@@ -740,23 +740,26 @@ function paintLines() {
     .map(
       (item) => `
       <div class="line">
-        <label data-area="code"><span>Code</span><input data-item-id="${item.id}" data-item-field="code" type="text" aria-label="Code" value="${esc(item.code)}" /></label>
-        <label data-area="description"><span>Description</span><input data-item-id="${item.id}" data-item-field="description" type="text" aria-label="Description" value="${esc(item.description)}" /></label>
-        <button type="button" class="icon-btn" data-remove="${item.id}" aria-label="Remove line">×</button>
-        <label data-area="unit"><span>Unit</span><input data-item-id="${item.id}" data-item-field="unit" type="text" aria-label="Unit" value="${esc(item.unit)}" /></label>
-        <label data-area="qty"><span>Qty</span><input data-item-id="${item.id}" data-item-field="qty" type="number" min="0" step="any" aria-label="Qty" value="${esc(item.qty)}" /></label>
-        <label data-area="rate"><span>Unit price</span><input data-item-id="${item.id}" data-item-field="rate" type="number" min="0" step="any" aria-label="Unit price" value="${esc(item.rate)}" /></label>
-        <label data-area="discount"><span>Discount %</span><input data-item-id="${item.id}" data-item-field="discount" type="number" min="0" step="0.01" aria-label="Discount percent" value="${esc(item.discount)}" /></label>
+        <div class="line-copy">
+          <label data-area="code"><span>Code</span><input data-item-id="${item.id}" data-item-field="code" type="text" aria-label="Code" value="${esc(item.code)}" /></label>
+          <label data-area="description"><span>Description</span><input data-item-id="${item.id}" data-item-field="description" type="text" aria-label="Description" value="${esc(item.description)}" /></label>
+          <button type="button" class="btn btn-quiet" data-clear="${item.id}">Clear</button>
+        </div>
+        <div class="line-figures">
+          <label data-area="unit"><span>Unit</span><input data-item-id="${item.id}" data-item-field="unit" type="text" aria-label="Unit" value="${esc(item.unit)}" /></label>
+          <label data-area="qty"><span>Qty</span><input data-item-id="${item.id}" data-item-field="qty" type="number" min="0" step="any" aria-label="Qty" value="${esc(item.qty)}" /></label>
+          <label data-area="rate"><span>Unit price</span><input data-item-id="${item.id}" data-item-field="rate" type="number" min="0" step="any" aria-label="Unit price" value="${esc(item.rate)}" /></label>
+          <label data-area="discount"><span>Discount %</span><input data-item-id="${item.id}" data-item-field="discount" type="number" min="0" step="0.01" aria-label="Discount percent" value="${esc(item.discount)}" /></label>
+        </div>
       </div>`
     )
     .join("");
-  lines.querySelectorAll("[data-remove]").forEach((button) => {
+  lines.querySelectorAll("[data-clear]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (invoice.items.length === 1) {
-        invoice.items[0] = { ...blankItem(), id: invoice.items[0].id };
-      } else {
-        invoice.items = invoice.items.filter((item) => item.id !== button.dataset.remove);
-      }
+      const item = invoice.items.find((entry) => entry.id === button.dataset.clear);
+      if (!item) return;
+      item.code = "";
+      item.description = "";
       save();
       paintLines();
       paintSheet();

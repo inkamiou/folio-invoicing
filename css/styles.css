@@ -558,13 +558,35 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .line {
   display: grid;
+  gap: 14px;
   min-width: 0;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr) minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
-  grid-template-areas:
-    "code description description description remove"
-    "unit qty rate discount .";
-  gap: 6px 8px;
-  align-items: end;
+}
+
+.line + .line {
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.line-copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(255, 252, 247, 0.72);
+}
+
+.line-copy .btn {
+  justify-self: start;
+}
+
+.line-figures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
 }
 
 .line label,
@@ -573,26 +595,9 @@ input[type="number"]::-webkit-outer-spin-button {
   max-width: 100%;
 }
 
-.line [data-area="code"] { grid-area: code; }
-.line [data-area="description"] { grid-area: description; }
-.line [data-remove] { grid-area: remove; }
-.line [data-area="unit"] { grid-area: unit; }
-.line [data-area="qty"] { grid-area: qty; }
-.line [data-area="rate"] { grid-area: rate; }
-.line [data-area="discount"] { grid-area: discount; }
-
 @container (max-width: 420px) {
-  .line {
+  .line-figures {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas:
-      "code description"
-      "unit qty"
-      "rate discount"
-      "remove remove";
-  }
-
-  .line [data-remove] {
-    justify-self: end;
   }
 
   .account {
