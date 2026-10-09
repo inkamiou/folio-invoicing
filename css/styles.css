@@ -177,6 +177,23 @@ main {
   margin-bottom: 14px;
 }
 
+.date-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.date-range label {
+  width: 180px;
+}
+
+.date-range .hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .chip,
 .btn {
   border: 1px solid var(--line-strong);

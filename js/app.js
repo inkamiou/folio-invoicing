@@ -109,6 +109,8 @@ const ui = {
   invoiceId: null,
   filter: "all",
   query: "",
+  fromDate: "",
+  toDate: "",
   error: "",
   editingClientId: null,
   clientQuery: "",
@@ -525,6 +527,11 @@ function renderInvoices() {
         )
         .join("")}
     </div>
+    <div class="date-range">
+      ${rangeField("from", "Issued from", ui.fromDate)}
+      ${rangeField("to", "Issued to", ui.toDate)}
+      <p class="hint" id="range-note"></p>
+    </div>
     <div class="ledger">
       <table>
         <thead>
@@ -556,6 +563,38 @@ function renderInvoices() {
       paintInvoiceRows();
     });
   });
+  main.querySelectorAll("[data-range]").forEach((field) => {
+    field.addEventListener("input", () => applyRange(field, false));
+    field.addEventListener("blur", () => applyRange(field, true));
+  });
+  main.querySelectorAll("[data-range-picker]").forEach((picker) => {
+    picker.addEventListener("input", () => {
+      const key = picker.dataset.rangePicker === "from" ? "fromDate" : "toDate";
+      ui[key] = picker.value;
+      const text = main.querySelector(`[data-range="${picker.dataset.rangePicker}"]`);
+      if (text) text.value = formatDate(picker.value, dateFormat());
+      paintInvoiceRows();
+    });
+  });
+  paintInvoiceRows();
+}
+
+function rangeField(name, label, value) {
+  const format = dateFormat();
+  return `<label><span>${label}</span><span class="date-field"><input data-range="${name}" type="text" inputmode="numeric" maxlength="10" placeholder="${datePattern(format)}" value="${esc(formatDate(value, format))}" autocomplete="off" /><input data-range-picker="${name}" type="date" value="${esc(value)}" aria-label="Choose ${label.toLowerCase()} date" /></span></label>`;
+}
+
+function applyRange(field, restore) {
+  const key = field.dataset.range === "from" ? "fromDate" : "toDate";
+  const parsed = parseDate(field.value, dateFormat());
+  if (parsed == null) {
+    if (restore) field.value = formatDate(ui[key], dateFormat());
+    return;
+  }
+  ui[key] = parsed;
+  field.value = formatDate(parsed, dateFormat());
+  const picker = main.querySelector(`[data-range-picker="${field.dataset.range}"]`);
+  if (picker) picker.value = parsed;
   paintInvoiceRows();
 }
 
@@ -564,6 +603,8 @@ function visibleInvoices() {
   return data.invoices.filter((invoice) => {
     if (ui.filter === "sent" && invoice.status !== "sent") return false;
     if (ui.filter !== "all" && ui.filter !== "sent" && statusLabel(invoice) !== ui.filter) return false;
+    if (ui.fromDate && invoice.issueDate < ui.fromDate) return false;
+    if (ui.toDate && invoice.issueDate > ui.toDate) return false;
     if (!query) return true;
     const client = clientById(invoice.clientId);
     return [invoice.number, client?.name, client?.email].join(" ").toLowerCase().includes(query);
@@ -573,7 +614,9 @@ function visibleInvoices() {
 function paintInvoiceRows() {
   const rows = main.querySelector("#invoice-rows");
   const empty = main.querySelector("#invoice-empty");
+  const note = main.querySelector("#range-note");
   const invoices = visibleInvoices();
+  if (note) note.textContent = ui.fromDate && ui.toDate && ui.fromDate > ui.toDate ? "Issued from is after issued to." : "";
   rows.innerHTML = invoices
     .map((invoice) => {
       const client = clientById(invoice.clientId);
