@@ -448,8 +448,8 @@ function renderInvoices() {
 function visibleInvoices() {
   const query = ui.query.trim().toLowerCase();
   return data.invoices.filter((invoice) => {
-    const status = statusLabel(invoice);
-    if (ui.filter !== "all" && status !== ui.filter) return false;
+    if (ui.filter === "sent" && invoice.status !== "sent") return false;
+    if (ui.filter !== "all" && ui.filter !== "sent" && statusLabel(invoice) !== ui.filter) return false;
     if (!query) return true;
     const client = clientById(invoice.clientId);
     return [invoice.number, client?.name, client?.email].join(" ").toLowerCase().includes(query);
