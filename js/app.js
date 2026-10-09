@@ -73,6 +73,9 @@ function prepareDesk(desk) {
   if (!desk) return desk;
   adoptTaxId(desk.business);
   (desk.clients || []).forEach(adoptTaxId);
+  (desk.invoices || []).forEach((invoice) => {
+    invoice.issued = Boolean(invoice.issued) || invoice.status !== "draft";
+  });
   return desk;
 }
 
@@ -256,6 +259,18 @@ function indexFromNumber(number) {
   return index;
 }
 
+function confirmNextNumber(index) {
+  if (index == null) return false;
+  const following = index + 1;
+  if (following === nextNumberValue()) return false;
+  const approved = confirm(
+    `Set the next invoice number to ${formatInvoiceNumber(following)}? It is currently ${formatInvoiceNumber(nextNumberValue())}.`
+  );
+  if (!approved) return false;
+  data.nextNumber = following;
+  return true;
+}
+
 function invoiceNumberTaken(number, exceptId) {
   const key = String(number || "").trim().toLowerCase();
   if (!key) return false;
@@ -287,6 +302,7 @@ function createInvoice() {
     issueDate: today(),
     dueDate: plusDays(14),
     status: "draft",
+    issued: false,
     notes: "",
     taxRate: Number(data.business.taxRate) || 0,
     items: [blankItem()],
@@ -574,7 +590,7 @@ function renderEditor() {
         <div class="actions">
           ${statusActions(invoice)}
           <button type="button" class="btn" id="print">Print</button>
-          <button type="button" class="btn btn-danger" id="delete">Delete</button>
+          ${invoice.status === "draft" ? `<button type="button" class="btn btn-danger" id="delete">Delete</button>` : ""}
         </div>
       </form>
       <div class="sheet-wrap" id="sheet-wrap"></div>
@@ -602,16 +618,8 @@ function renderEditor() {
     const typed = event.target.value.trim();
     if (typed === event.target.dataset.settled) return;
     event.target.dataset.settled = typed;
-    const index = indexFromNumber(typed);
-    if (index == null) return;
-    const following = index + 1;
-    if (following === nextNumberValue()) return;
-    const approved = confirm(
-      `Set the next invoice number to ${formatInvoiceNumber(following)}? It is currently ${formatInvoiceNumber(nextNumberValue())}.`
-    );
-    if (!approved) return;
-    data.nextNumber = following;
-    save();
+    if (!invoice.issued) return;
+    if (confirmNextNumber(indexFromNumber(typed))) save();
   });
   main.querySelector("#add-line").addEventListener("click", () => {
     invoice.items.push(blankItem());
@@ -620,9 +628,12 @@ function renderEditor() {
     paintSheet();
   });
   main.querySelector("#print").addEventListener("click", () => window.print());
-  main.querySelector("#delete").addEventListener("click", () => {
+  main.querySelector("#delete")?.addEventListener("click", () => {
     if (!confirm(`Delete ${invoice.number}?`)) return;
+    const index = indexFromNumber(invoice.number);
+    const reusable = !invoice.issued && index != null && index + 1 === nextNumberValue();
     data.invoices = data.invoices.filter((item) => item.id !== invoice.id);
+    if (reusable) data.nextNumber = index;
     save();
     ui.view = "invoices";
     render();
@@ -729,6 +740,8 @@ function setStatus(status) {
       if (error) error.textContent = ui.error;
       return;
     }
+    if (!invoice.issued) confirmNextNumber(indexFromNumber(invoice.number));
+    invoice.issued = true;
   }
   invoice.status = status;
   ui.error = "";

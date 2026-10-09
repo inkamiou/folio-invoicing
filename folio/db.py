@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   status TEXT NOT NULL DEFAULT 'draft',
   notes TEXT NOT NULL DEFAULT '',
   tax_rate REAL NOT NULL DEFAULT 0,
+  issued INTEGER NOT NULL DEFAULT 0,
   position INTEGER NOT NULL
 );
 
@@ -102,11 +103,13 @@ def ensure_columns(connection):
         ("business", "number_length", "INTEGER NOT NULL DEFAULT 3"),
         ("clients", "registration_number", "TEXT NOT NULL DEFAULT ''"),
         ("clients", "tax_id", "TEXT NOT NULL DEFAULT ''"),
+        ("invoices", "issued", "INTEGER NOT NULL DEFAULT 0"),
     )
     for table, column, definition in additions:
         names = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
         if column not in names:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    connection.execute("UPDATE invoices SET issued = 1 WHERE status != 'draft' AND issued = 0")
 
 
 def ensure_item_shape(connection):
@@ -356,6 +359,7 @@ def load_desk():
                     "status": invoice["status"],
                     "notes": invoice["notes"],
                     "taxRate": invoice["tax_rate"],
+                    "issued": bool(invoice["issued"]),
                     "items": items,
                 }
             )
@@ -469,8 +473,8 @@ def save_desk(desk):
             connection.execute(
                 """
                 INSERT INTO invoices (
-                  id, number, client_id, issue_date, due_date, status, notes, tax_rate, position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  id, number, client_id, issue_date, due_date, status, notes, tax_rate, issued, position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     invoice_id,
@@ -481,6 +485,7 @@ def save_desk(desk):
                     _text(invoice.get("status")) or "draft",
                     _text(invoice.get("notes")),
                     _number(invoice.get("taxRate")),
+                    1 if invoice.get("issued") or (_text(invoice.get("status")) or "draft") != "draft" else 0,
                     position,
                 ),
             )
