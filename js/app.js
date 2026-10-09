@@ -78,6 +78,9 @@ function prepareDesk(desk) {
   (desk.invoices || []).forEach((invoice) => {
     invoice.issued = Boolean(invoice.issued) || invoice.status !== "draft";
     invoice.dateFormat = knownDateFormat(invoice.dateFormat);
+    (invoice.items || []).forEach((item) => {
+      if (item.tax == null || item.tax === "") item.tax = Number(invoice.taxRate) || 0;
+    });
   });
   return desk;
 }
@@ -158,7 +161,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
-  if (target.dataset.field !== "taxRate" && target.dataset.business !== "taxRate") return;
+  if (target.dataset.field !== "taxRate" && target.dataset.business !== "taxRate" && target.dataset.itemField !== "tax") return;
   event.preventDefault();
   const current = Number(target.value);
   const base = Number.isFinite(current) ? current : 0;
@@ -241,8 +244,13 @@ function uid() {
   return crypto.randomUUID();
 }
 
+function defaultTax() {
+  const rate = Number(data.business.taxRate);
+  return Number.isFinite(rate) ? rate : 0;
+}
+
 function blankItem() {
-  return { id: uid(), code: "", description: "", unit: "", qty: "", rate: "", discount: "" };
+  return { id: uid(), code: "", description: "", unit: "", qty: "", rate: "", discount: "", tax: defaultTax() };
 }
 
 function blankAccount() {
@@ -445,6 +453,29 @@ function lineAmount(item) {
   return roundMoney(lineGross(item) - lineDiscountAmount(item));
 }
 
+function lineTaxRate(item) {
+  if (!hasMark(item.tax)) return null;
+  const tax = Number(item.tax);
+  return Number.isFinite(tax) ? tax : null;
+}
+
+function lineTaxAmount(item) {
+  const tax = lineTaxRate(item);
+  if (tax == null) return 0;
+  return roundMoney(lineAmount(item) * (tax / 100));
+}
+
+function taxRows(lines) {
+  const groups = new Map();
+  lines.forEach((item) => {
+    const rate = lineTaxRate(item);
+    if (rate == null) return;
+    const key = String(rate);
+    groups.set(key, (groups.get(key) || 0) + lineTaxAmount(item));
+  });
+  return [...groups.entries()].map(([rate, amount]) => ({ rate, amount: roundMoney(amount) }));
+}
+
 function lineHasData(item) {
   return ["code", "description", "unit", "qty", "rate", "discount"].some((key) => hasMark(item[key]));
 }
@@ -461,7 +492,7 @@ function totals(invoice) {
   const lines = invoiceLines(invoice);
   const discount = roundMoney(lines.reduce((sum, item) => sum + lineDiscountAmount(item), 0));
   const subtotal = roundMoney(lines.reduce((sum, item) => sum + lineAmount(item), 0));
-  const tax = roundMoney(subtotal * ((Number(invoice.taxRate) || 0) / 100));
+  const tax = roundMoney(lines.reduce((sum, item) => sum + lineTaxAmount(item), 0));
   return { discount, subtotal, tax, total: roundMoney(subtotal + tax) };
 }
 
@@ -719,7 +750,6 @@ function renderEditor() {
             <div class="lines" id="lines"></div>
             <button type="button" class="btn btn-quiet" id="add-line">Add line</button>
           </div>
-          <label class="field-tax"><span>Tax %</span><input data-field="taxRate" type="number" min="0" step="any" value="${esc(invoice.taxRate)}" /></label>
           <label><span>Notes</span><textarea data-field="notes">${esc(invoice.notes)}</textarea></label>
         </div>
         <p class="form-error" id="form-error">${esc(ui.error)}</p>
@@ -753,6 +783,8 @@ function renderEditor() {
     } else button.focus();
   };
   main.querySelector("#back").addEventListener("click", () => {
+    ui.editingLineId = null;
+    if (releaseEmptyLine(invoice)) save();
     ui.view = "invoices";
     ui.preview = false;
     document.body.classList.remove("preview-open");
@@ -856,11 +888,13 @@ function statusActions(invoice) {
 }
 
 function releaseEmptyLine(invoice) {
-  if (invoice.items.length < 2 || !ui.editingLineId) return;
-  const item = invoice.items.find((entry) => entry.id === ui.editingLineId);
-  if (!item || lineHasData(item)) return;
-  invoice.items = invoice.items.filter((entry) => entry.id !== item.id);
-  ui.editingLineId = null;
+  const kept = invoice.items.filter((item) => item.id === ui.editingLineId || lineHasData(item));
+  if (kept.length === invoice.items.length) return false;
+  invoice.items = kept.length ? kept : [blankItem()];
+  if (!invoice.items.some((item) => item.id === ui.editingLineId)) {
+    ui.editingLineId = !lineHasData(invoice.items[0]) ? invoice.items[0].id : null;
+  }
+  return true;
 }
 
 function focusEditingLine() {
@@ -876,24 +910,13 @@ function summaryColumns(items) {
     ["qty", "Qty"],
     ["rate", "Unit price"],
     ["discount", "Discount"],
+    ["tax", "Tax"],
     ["amount", "Amount"],
   ].filter(([key]) => items.some((item) => columnHasMark(item, key)));
 }
 
-function summaryTemplate(columns) {
-  return [
-    ...columns.map(([key]) => {
-      if (key === "description") return "minmax(120px, 2.2fr)";
-      if (key === "qty") return "minmax(4.8em, 0.7fr)";
-      if (["rate", "discount", "amount"].includes(key)) return "minmax(5.5em, 0.9fr)";
-      return "minmax(72px, 0.8fr)";
-    }),
-    "auto",
-  ].join(" ");
-}
-
 function summaryNum(key) {
-  return ["qty", "rate", "discount", "amount"].includes(key) ? "num" : "";
+  return ["qty", "rate", "discount", "tax", "amount"].includes(key) ? "num" : "";
 }
 
 function paintLines() {
@@ -901,49 +924,54 @@ function paintLines() {
   const lines = main.querySelector("#lines");
   if (!invoice || !lines) return;
   if (ui.editingLineId && !invoice.items.some((item) => item.id === ui.editingLineId)) ui.editingLineId = null;
+  if (releaseEmptyLine(invoice)) save();
   const collapsed = invoice.items.filter((item) => item.id !== ui.editingLineId && lineHasData(item));
   const columns = summaryColumns(collapsed);
-  const template = summaryTemplate(columns);
   const canRemove = invoice.items.length > 1;
-  lines.innerHTML = `
-    ${
-      columns.length
-        ? `<div class="line-summary line-summary-head" style="--summary-cols:${template}">
-            ${columns.map(([key, label]) => `<span class="${summaryNum(key)}">${esc(label)}</span>`).join("")}
-            <span></span>
-          </div>`
-        : ""
-    }
-    ${invoice.items
-      .map((item) =>
-        item.id === ui.editingLineId
-          ? `<div class="line">
-              <div class="line-copy">
-                <label data-area="code"><span>Code</span><input data-item-id="${item.id}" data-item-field="code" type="text" aria-label="Code" value="${esc(item.code)}" /></label>
-                <label data-area="description"><span>Description</span><input data-item-id="${item.id}" data-item-field="description" type="text" aria-label="Description" value="${esc(item.description)}" /></label>
-                <div class="line-figures">
-                  <label data-area="unit"><span>Unit</span><input data-item-id="${item.id}" data-item-field="unit" type="text" aria-label="Unit" value="${esc(item.unit)}" /></label>
-                  <label data-area="qty"><span>Qty</span><input data-item-id="${item.id}" data-item-field="qty" type="number" min="0" step="any" aria-label="Qty" value="${esc(item.qty)}" /></label>
-                  <label data-area="rate"><span>Unit price</span><input data-item-id="${item.id}" data-item-field="rate" type="number" min="0" step="any" aria-label="Unit price" value="${esc(item.rate)}" /></label>
-                  <label data-area="discount"><span>Discount %</span><input data-item-id="${item.id}" data-item-field="discount" type="number" min="0" step="0.01" aria-label="Discount percent" value="${esc(item.discount)}" /></label>
-                </div>
-                <button type="button" class="btn btn-quiet" data-clear="${item.id}">Clear</button>
-              </div>
-              ${canRemove ? `<div class="line-summary-actions"><button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button></div>` : ""}
-            </div>`
-          : `<div class="line line-summary" style="--summary-cols:${columns.length ? template : "minmax(0, 1fr) auto"}">
-              ${
-                columns.length
-                  ? columns.map(([key]) => `<span class="${summaryNum(key)}">${itemCell(item, key)}</span>`).join("")
-                  : `<span class="line-summary-empty">Line</span>`
-              }
-              <span class="line-summary-actions">
-                <button type="button" class="btn" data-edit="${item.id}">Edit</button>
-                ${canRemove ? `<button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button>` : ""}
-              </span>
-            </div>`
-      )
-      .join("")}`;
+  const openLine = (item) => `
+    <div class="line">
+      <div class="line-copy">
+        <label data-area="code"><span>Code</span><input data-item-id="${item.id}" data-item-field="code" type="text" aria-label="Code" value="${esc(item.code)}" /></label>
+        <label data-area="description"><span>Description</span><input data-item-id="${item.id}" data-item-field="description" type="text" aria-label="Description" value="${esc(item.description)}" /></label>
+        <div class="line-figures">
+          <label data-area="unit"><span>Unit</span><input data-item-id="${item.id}" data-item-field="unit" type="text" aria-label="Unit" value="${esc(item.unit)}" /></label>
+          <label data-area="qty"><span>Qty</span><input data-item-id="${item.id}" data-item-field="qty" type="number" min="0" step="any" aria-label="Qty" value="${esc(item.qty)}" /></label>
+          <label data-area="rate"><span>Unit price</span><input data-item-id="${item.id}" data-item-field="rate" type="number" min="0" step="any" aria-label="Unit price" value="${esc(item.rate)}" /></label>
+          <label data-area="discount"><span>Discount %</span><input data-item-id="${item.id}" data-item-field="discount" type="number" min="0" step="0.01" aria-label="Discount percent" value="${esc(item.discount)}" /></label>
+          <label data-area="tax"><span>Tax %</span><input data-item-id="${item.id}" data-item-field="tax" type="number" min="0" step="any" aria-label="Tax percent" value="${esc(item.tax)}" /></label>
+        </div>
+        <button type="button" class="btn btn-quiet" data-clear="${item.id}">Clear</button>
+      </div>
+      ${canRemove ? `<div class="line-summary-actions"><button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button></div>` : ""}
+    </div>`;
+  lines.innerHTML = columns.length
+    ? `<table class="line-table">
+        <thead>
+          <tr>
+            ${columns.map(([key, label]) => `<th class="${summaryNum(key)}">${esc(label)}</th>`).join("")}
+            <th class="actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${invoice.items
+            .filter((item) => item.id === ui.editingLineId || lineHasData(item))
+            .map((item) =>
+              item.id === ui.editingLineId
+                ? `<tr class="line-form-row"><td colspan="${columns.length + 1}">${openLine(item)}</td></tr>`
+                : `<tr>
+                    ${columns.map(([key]) => `<td class="${summaryNum(key)}">${itemCell(item, key)}</td>`).join("")}
+                    <td class="actions">
+                      <span class="line-summary-actions">
+                        <button type="button" class="btn" data-edit="${item.id}">Edit</button>
+                        ${canRemove ? `<button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button>` : ""}
+                      </span>
+                    </td>
+                  </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>`
+    : invoice.items.map((item) => openLine(item)).join("");
   lines.querySelectorAll("[data-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.edit === ui.editingLineId) return;
@@ -977,6 +1005,7 @@ function paintLines() {
       item.qty = "";
       item.rate = "";
       item.discount = "";
+      item.tax = defaultTax();
       save();
       paintLines();
       paintSheet();
@@ -1061,6 +1090,7 @@ function itemCell(item, key) {
   if (key === "amount") return hasMark(item.qty) || hasMark(item.rate) ? esc(money(lineAmount(item))) : "";
   if (key === "rate") return hasMark(item.rate) ? esc(money(item.rate)) : "";
   if (key === "discount") return hasMark(item.discount) ? `${esc(item.discount)}%` : "";
+  if (key === "tax") return hasMark(item.tax) ? `${esc(item.tax)}%` : "";
   return hasMark(item[key]) ? esc(item[key]) : "";
 }
 
@@ -1118,6 +1148,7 @@ function paintSheet({ animate = false } = {}) {
     qty: 1,
     rate: 1.3,
     discount: 1.8,
+    tax: 0.9,
     amount: 1.3,
   };
   const columns = [
@@ -1127,6 +1158,7 @@ function paintSheet({ animate = false } = {}) {
     ["qty", "Qty"],
     ["rate", "Unit price"],
     ["discount", "Discount"],
+    ["tax", "Tax"],
     ["amount", "Amount"],
   ].filter(([key]) => invoiceLines(invoice).some((item) => columnHasMark(item, key)));
   const weightTotal = columns.reduce((sum, [key]) => sum + columnWeight[key], 0);
@@ -1170,7 +1202,7 @@ function paintSheet({ animate = false } = {}) {
             ${columns
               .map(
                 ([key, label]) =>
-                  `<th class="${["qty", "rate", "discount", "amount"].includes(key) ? "amount" : ""} ${key === "qty" ? "qty" : ""}" style="width:${((columnWeight[key] / weightTotal) * 100).toFixed(2)}%">${sheetLabel(label)}</th>`
+                  `<th class="${["qty", "rate", "discount", "tax", "amount"].includes(key) ? "amount" : ""} ${key === "qty" ? "qty" : ""}" style="width:${((columnWeight[key] / weightTotal) * 100).toFixed(2)}%">${sheetLabel(label)}</th>`
               )
               .join("")}
           </tr>
@@ -1183,7 +1215,7 @@ function paintSheet({ animate = false } = {}) {
               ${columns
                 .map(
                   ([key]) =>
-                    `<td class="${["qty", "rate", "discount", "amount"].includes(key) ? "amount" : ""} ${key === "qty" ? "qty" : ""}">${itemCell(item, key)}</td>`
+                    `<td class="${["qty", "rate", "discount", "tax", "amount"].includes(key) ? "amount" : ""} ${key === "qty" ? "qty" : ""}">${itemCell(item, key)}</td>`
                 )
                 .join("")}
             </tr>`
@@ -1196,7 +1228,9 @@ function paintSheet({ animate = false } = {}) {
       <div class="totals">
         ${sums.discount ? `<div><span>Discount</span><span>−${money(sums.discount)}</span></div>` : ""}
         <div><span>Subtotal</span><span>${money(sums.subtotal)}</span></div>
-        <div><span>Tax ${esc(invoice.taxRate)}%</span><span>${money(sums.tax)}</span></div>
+        ${taxRows(invoiceLines(invoice))
+          .map((row) => `<div><span>Tax ${esc(row.rate)}%</span><span>${money(row.amount)}</span></div>`)
+          .join("")}
         <div class="grand"><span>Total</span><span>${money(sums.total)}</span></div>
       </div>
       ${

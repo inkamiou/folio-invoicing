@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   qty REAL,
   rate REAL,
   discount REAL,
+  tax REAL,
   position INTEGER NOT NULL
 );
 
@@ -117,6 +118,7 @@ def ensure_columns(connection):
         ("clients", "registration_number", "TEXT NOT NULL DEFAULT ''"),
         ("clients", "tax_id", "TEXT NOT NULL DEFAULT ''"),
         ("invoices", "issued", "INTEGER NOT NULL DEFAULT 0"),
+        ("invoice_items", "tax", "REAL"),
     )
     for table, column, definition in additions:
         names = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
@@ -133,6 +135,7 @@ def ensure_item_shape(connection):
         "code" in columns
         and "unit" in columns
         and "discount" in columns
+        and "tax" in columns
         and not columns["qty"]["notnull"]
         and not columns["rate"]["notnull"]
     )
@@ -150,6 +153,7 @@ def ensure_item_shape(connection):
           qty REAL,
           rate REAL,
           discount REAL,
+          tax REAL,
           position INTEGER NOT NULL
         )
         """
@@ -157,12 +161,13 @@ def ensure_item_shape(connection):
     code = "code" if "code" in columns else "''"
     unit = "unit" if "unit" in columns else "''"
     discount = "discount" if "discount" in columns else "NULL"
+    tax = "tax" if "tax" in columns else "NULL"
     connection.execute(
         f"""
         INSERT INTO invoice_items (
-          id, invoice_id, code, description, unit, qty, rate, discount, position
+          id, invoice_id, code, description, unit, qty, rate, discount, tax, position
         )
-        SELECT id, invoice_id, {code}, description, {unit}, qty, rate, {discount}, position
+        SELECT id, invoice_id, {code}, description, {unit}, qty, rate, {discount}, {tax}, position
         FROM invoice_items_old
         """
     )
@@ -363,6 +368,7 @@ def load_desk():
                     "qty": _number_out(item["qty"]),
                     "rate": _number_out(item["rate"]),
                     "discount": _number_out(item["discount"]),
+                    "tax": invoice["tax_rate"] if item["tax"] is None else _number_out(item["tax"]),
                 }
                 for item in connection.execute(
                     "SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY position",
@@ -520,8 +526,8 @@ def save_desk(desk):
                 connection.execute(
                     """
                     INSERT INTO invoice_items (
-                      id, invoice_id, code, description, unit, qty, rate, discount, position
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      id, invoice_id, code, description, unit, qty, rate, discount, tax, position
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         _identity(item.get("id")),
@@ -532,6 +538,7 @@ def save_desk(desk):
                         _optional_number(item.get("qty")),
                         _optional_number(item.get("rate")),
                         _optional_number(item.get("discount")),
+                        _optional_number(item.get("tax")),
                         item_position,
                     ),
                 )
