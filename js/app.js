@@ -712,6 +712,13 @@ function itemCell(item, key) {
   return hasMark(item[key]) ? esc(item[key]) : "";
 }
 
+function sheetText(text) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => `<span class="sheet-line">${esc(line) || "&#8203;"}</span>`)
+    .join("");
+}
+
 function sheetLabel(label) {
   return String(label)
     .split(" ")
@@ -786,7 +793,7 @@ function paintSheet({ animate = false } = {}) {
         <div>
           ${logoSrc(business.logo) ? `<img class="sheet-logo" src="${logoSrc(business.logo)}" alt="" />` : ""}
           <p class="sheet-brand">${esc(business.name || "Your business")}</p>
-          <p class="sheet-meta">${esc(businessLines)}</p>
+          <p class="sheet-meta">${sheetText(businessLines)}</p>
         </div>
         <div>
           <p class="invoice-word">Invoice</p>
@@ -796,12 +803,11 @@ function paintSheet({ animate = false } = {}) {
       <section class="bill-row">
         <div>
           <h3>Bill to</h3>
-          <p>${esc(clientLines)}</p>
+          <p>${sheetText(clientLines)}</p>
         </div>
         <div>
           <h3>Dates</h3>
-          <p>Issued ${esc(invoice.issueDate || "—")}
-Due ${esc(invoice.dueDate || "—")}</p>
+          <p>${sheetText(`Issued ${invoice.issueDate || "—"}\nDue ${invoice.dueDate || "—"}`)}</p>
         </div>
       </section>
       ${
@@ -970,16 +976,12 @@ function paintClients() {
       <article class="client-card">
         <div>
           <strong>${esc(client.name)}</strong>
-          <p>${esc(
-            [
-              client.email,
-              client.address,
-              client.registrationNumber && `Reg. no. ${client.registrationNumber}`,
-              client.taxId && `Tax ID ${client.taxId}`,
-            ]
+          <p>
+            ${[client.email, client.address, client.registrationNumber && `Reg. no. ${client.registrationNumber}`, client.taxId && `Tax ID ${client.taxId}`]
               .filter(Boolean)
-              .join(" · ")
-          )}</p>
+              .map((line) => sheetText(line))
+              .join("")}
+          </p>
         </div>
         <div class="client-actions">
           <button type="button" class="btn" data-edit-client="${client.id}">Edit</button>
