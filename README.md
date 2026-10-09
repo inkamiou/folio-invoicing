@@ -60,4 +60,4 @@ Windows opens Folio in the Edge web view. Invoices are stored in `%LOCALAPPDATA%
 
 Open `index.html` in a browser, from this folder.
 
-The browser copy is saved in that browser only. Clearing the browser's site data removes it. The sidebar notes this. Use Export backup on the Business screen if you want a file you can import into the Folio window later.
+The browser copy is saved in that browser only. Clearing the browser's site data removes the application's data. Use Export backup on the Business screen if you want a file you can import later into the Folio desktop.
