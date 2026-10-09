@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Folio
+GenericName=Invoicing
+Comment=Write invoices and keep them on this computer
+Exec=/usr/bin/python3 -m folio
+Path=/home/indrek/Workspace/invoicing
+Icon=/home/indrek/Workspace/invoicing/assets/folio.png
+Terminal=false
+Categories=Office;Finance;
+StartupWMClass=folio

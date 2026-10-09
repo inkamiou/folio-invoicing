@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Folio — Invoicing</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,460;9..144,620&family=Schibsted+Grotesk:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div class="desk">
+      <aside class="rail">
+        <div class="mark">
+          <p class="kicker">Invoicing desk</p>
+          <h1>Folio</h1>
+        </div>
+        <nav class="nav" aria-label="Sections">
+          <button type="button" data-nav="invoices">Invoices</button>
+          <button type="button" data-nav="clients">Clients</button>
+          <button type="button" data-nav="business">Business</button>
+        </nav>
+        <dl class="rail-stats">
+          <div>
+            <dt>Outstanding</dt>
+            <dd id="stat-outstanding">—</dd>
+          </div>
+          <div>
+            <dt>Paid</dt>
+            <dd id="stat-paid">—</dd>
+          </div>
+        </dl>
+        <button type="button" class="btn btn-primary rail-new" id="new-invoice">
+          New invoice
+        </button>
+        <p class="rail-note">Saved in the Folio database on this computer.</p>
+      </aside>
+      <main id="main"></main>
+    </div>
+    <script src="js/app.js"></script>
+  </body>
+</html>
