@@ -136,6 +136,7 @@ button {
 main {
   min-width: 0;
   padding: 28px 32px 48px;
+  overflow-x: auto;
 }
 
 .toolbar {
@@ -314,7 +315,8 @@ tr.invoice-row:hover td {
 }
 
 .panel {
-  max-width: 760px;
+  width: min(100%, 760px);
+  min-width: 680px;
   background: rgba(251, 247, 240, 0.78);
   border-radius: 18px;
   padding: 28px;
@@ -354,6 +356,19 @@ textarea {
 textarea {
   min-height: 88px;
   resize: vertical;
+}
+
+input[type="number"] {
+  -webkit-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+  margin: 0;
 }
 
 .picker-native {
@@ -587,6 +602,10 @@ textarea {
   animation: rise 0.45s ease both;
 }
 
+.sheet.sheet-quiet {
+  animation: none;
+}
+
 .sheet-top {
   display: flex;
   justify-content: space-between;
@@ -608,6 +627,10 @@ textarea {
   height: auto;
   object-fit: contain;
   margin-bottom: 12px;
+}
+
+#currency-form[hidden] {
+  display: none;
 }
 
 .currency-add {
@@ -712,7 +735,12 @@ textarea {
 .sheet td,
 .sheet th {
   padding: 10px 0;
-  overflow-wrap: break-word;
+  overflow-wrap: normal;
+  hyphens: none;
+}
+
+.sheet-word {
+  white-space: nowrap;
 }
 
 .sheet th {

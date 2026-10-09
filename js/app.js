@@ -209,12 +209,9 @@ function isGeneratedPaymentNote(notes) {
   return text === "Payment due on the issue date." || /^Payment due within \d+ days?\.$/.test(text);
 }
 
-function syncPaymentNote(invoice) {
-  const current = String(invoice.notes || "").trim();
-  if (current && !isGeneratedPaymentNote(current)) return false;
-  const terms = paymentTerms(invoice);
-  if (invoice.notes === terms) return false;
-  invoice.notes = terms;
+function clearGeneratedPaymentNote(invoice) {
+  if (!isGeneratedPaymentNote(invoice.notes)) return false;
+  invoice.notes = "";
   return true;
 }
 
@@ -273,7 +270,6 @@ function createInvoice() {
     taxRate: Number(data.business.taxRate) || 0,
     items: [blankItem()],
   };
-  invoice.notes = paymentTerms(invoice);
   data.nextNumber += 1;
   data.invoices.unshift(invoice);
   save();
@@ -508,7 +504,7 @@ function renderEditor() {
     renderInvoices();
     return;
   }
-  if (syncPaymentNote(invoice)) save();
+  if (clearGeneratedPaymentNote(invoice)) save();
   const clientOptions = data.clients
     .map(
       (client) =>
@@ -537,7 +533,6 @@ function renderEditor() {
             <label><span>Due</span><input data-field="dueDate" type="date" value="${esc(invoice.dueDate)}" /></label>
           </div>
           <div>
-            <span class="field-label">Line items</span>
             <div class="lines" id="lines"></div>
             <button type="button" class="btn btn-quiet" id="add-line">Add line</button>
           </div>
@@ -556,7 +551,7 @@ function renderEditor() {
   `;
 
   paintLines();
-  paintSheet();
+  paintSheet({ animate: true });
 
   main.querySelector("#back").addEventListener("click", () => {
     ui.view = "invoices";
@@ -643,10 +638,6 @@ function onInvoiceInput(event) {
       return;
     }
     invoice[target.dataset.field] = target.type === "number" ? Number(target.value) : target.dataset.field === "number" ? target.value.trim() : target.value;
-    if ((target.dataset.field === "issueDate" || target.dataset.field === "dueDate") && syncPaymentNote(invoice)) {
-      const notes = main.querySelector('[data-field="notes"]');
-      if (notes) notes.value = invoice.notes;
-    }
   }
   if (target.dataset.itemField) {
     const item = invoice.items.find((entry) => entry.id === target.dataset.itemId);
@@ -709,7 +700,14 @@ function itemCell(item, key) {
   return hasMark(item[key]) ? esc(item[key]) : "";
 }
 
-function paintSheet() {
+function sheetLabel(label) {
+  return String(label)
+    .split(" ")
+    .map((word) => `<span class="sheet-word">${esc(word)}</span>`)
+    .join(" ");
+}
+
+function paintSheet({ animate = false } = {}) {
   const invoice = currentInvoice();
   const wrap = main.querySelector("#sheet-wrap");
   if (!invoice || !wrap) return;
@@ -748,7 +746,7 @@ function paintSheet() {
     unit: 0.9,
     qty: 1,
     rate: 1.3,
-    discount: 1.2,
+    discount: 1.8,
     amount: 1.3,
   };
   const columns = [
@@ -802,7 +800,7 @@ Due ${esc(invoice.dueDate || "—")}</p>
             ${columns
               .map(
                 ([key, label]) =>
-                  `<th class="${["qty", "rate", "discount", "amount"].includes(key) ? "amount" : ""} ${key === "qty" ? "qty" : ""}" style="width:${((columnWeight[key] / weightTotal) * 100).toFixed(2)}%">${label}</th>`
+                  `<th class="${["qty", "rate", "discount", "amount"].includes(key) ? "amount" : ""} ${key === "qty" ? "qty" : ""}" style="width:${((columnWeight[key] / weightTotal) * 100).toFixed(2)}%">${sheetLabel(label)}</th>`
               )
               .join("")}
           </tr>
@@ -839,6 +837,7 @@ Due ${esc(invoice.dueDate || "—")}</p>
       ${invoice.notes && !isGeneratedPaymentNote(invoice.notes) ? `<p class="notes">${esc(invoice.notes)}</p>` : ""}
     </article>
   `;
+  if (!animate) wrap.querySelector(".sheet")?.classList.add("sheet-quiet");
 }
 
 function renderClients() {
@@ -973,12 +972,14 @@ function renderBusiness() {
           <label><span>Default tax %</span><input data-business="taxRate" type="number" min="0" step="any" value="${esc(business.taxRate)}" /></label>
         </div>
         <div>
-          <span class="field-label">Add a currency</span>
-          <div class="currency-add">
-            <input id="new-currency" type="text" maxlength="12" placeholder="BTC" autocomplete="off" />
-            <button type="button" class="btn" id="add-currency">Add</button>
+          <button type="button" class="btn btn-quiet" id="show-currency">Add Currency</button>
+          <div id="currency-form" hidden>
+            <div class="currency-add">
+              <input id="new-currency" type="text" maxlength="12" placeholder="BTC" autocomplete="off" />
+              <button type="button" class="btn" id="add-currency">Add</button>
+            </div>
+            <p class="form-error" id="currency-error"></p>
           </div>
-          <p class="form-error" id="currency-error"></p>
           <div class="currency-extra" id="currency-extra"></div>
         </div>
         <div>
@@ -1048,6 +1049,11 @@ function renderBusiness() {
     data.business.logo = "";
     save();
     render();
+  });
+  main.querySelector("#show-currency").addEventListener("click", () => {
+    main.querySelector("#show-currency").hidden = true;
+    main.querySelector("#currency-form").hidden = false;
+    main.querySelector("#new-currency").focus();
   });
   main.querySelector("#add-currency").addEventListener("click", addCurrency);
   main.querySelector("#new-currency").addEventListener("keydown", (event) => {
