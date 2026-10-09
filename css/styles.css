@@ -618,6 +618,11 @@ input[type="number"]::-webkit-outer-spin-button {
   min-width: 0;
 }
 
+.line-tools {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .line + .line {
   margin-top: 6px;
   padding-top: 14px;

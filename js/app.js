@@ -444,9 +444,22 @@ function lineAmount(item) {
   return roundMoney(lineGross(item) - lineDiscountAmount(item));
 }
 
+function lineHasData(item) {
+  return ["code", "description", "unit", "qty", "rate", "discount"].some((key) => hasMark(item[key]));
+}
+
+function lineOnInvoice(item) {
+  return hasMark(item.description) && hasMark(item.rate);
+}
+
+function invoiceLines(invoice) {
+  return invoice.items.filter(lineOnInvoice);
+}
+
 function totals(invoice) {
-  const discount = roundMoney(invoice.items.reduce((sum, item) => sum + lineDiscountAmount(item), 0));
-  const subtotal = roundMoney(invoice.items.reduce((sum, item) => sum + lineAmount(item), 0));
+  const lines = invoiceLines(invoice);
+  const discount = roundMoney(lines.reduce((sum, item) => sum + lineDiscountAmount(item), 0));
+  const subtotal = roundMoney(lines.reduce((sum, item) => sum + lineAmount(item), 0));
   const tax = roundMoney(subtotal * ((Number(invoice.taxRate) || 0) / 100));
   return { discount, subtotal, tax, total: roundMoney(subtotal + tax) };
 }
@@ -789,6 +802,8 @@ function renderEditor() {
     });
   });
   main.querySelector("#add-line").addEventListener("click", () => {
+    const last = invoice.items[invoice.items.length - 1];
+    if (last && !lineHasData(last)) return;
     invoice.items.push(blankItem());
     save();
     paintLines();
@@ -835,6 +850,11 @@ function paintLines() {
     .map(
       (item) => `
       <div class="line">
+        ${
+          invoice.items.length > 1
+            ? `<div class="line-tools"><button type="button" class="icon-btn" data-remove="${item.id}" aria-label="Remove line">×</button></div>`
+            : ""
+        }
         <div class="line-copy">
           <label data-area="code"><span>Code</span><input data-item-id="${item.id}" data-item-field="code" type="text" aria-label="Code" value="${esc(item.code)}" /></label>
           <label data-area="description"><span>Description</span><input data-item-id="${item.id}" data-item-field="description" type="text" aria-label="Description" value="${esc(item.description)}" /></label>
@@ -849,6 +869,15 @@ function paintLines() {
       </div>`
     )
     .join("");
+  lines.querySelectorAll("[data-remove]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (invoice.items.length === 1) return;
+      invoice.items = invoice.items.filter((item) => item.id !== button.dataset.remove);
+      save();
+      paintLines();
+      paintSheet();
+    });
+  });
   lines.querySelectorAll("[data-clear]").forEach((button) => {
     button.addEventListener("click", () => {
       const item = invoice.items.find((entry) => entry.id === button.dataset.clear);
@@ -905,9 +934,7 @@ function invoiceProblems(invoice) {
   const problems = [];
   if (!data.business.name.trim()) problems.push("Add your business name first.");
   if (!invoice.clientId) problems.push("Choose a client.");
-  if (!invoice.items.some((item) => item.description.trim() && lineAmount(item) > 0)) {
-    problems.push("Add a line with a description and an amount.");
-  }
+  if (!invoiceLines(invoice).length) problems.push("Add a line with a description and a unit price.");
   if (invoiceNumberTaken(invoice.number, invoice.id)) problems.push("An invoice with this number already exists.");
   return problems;
 }
@@ -1008,7 +1035,7 @@ function paintSheet({ animate = false } = {}) {
     ["rate", "Unit price"],
     ["discount", "Discount"],
     ["amount", "Amount"],
-  ].filter(([key]) => invoice.items.some((item) => columnHasMark(item, key)));
+  ].filter(([key]) => invoiceLines(invoice).some((item) => columnHasMark(item, key)));
   const weightTotal = columns.reduce((sum, [key]) => sum + columnWeight[key], 0);
   const accountBlocks = (business.accounts || [])
     .map((account) =>
@@ -1056,7 +1083,7 @@ function paintSheet({ animate = false } = {}) {
           </tr>
         </thead>
         <tbody>
-          ${invoice.items
+          ${invoiceLines(invoice)
             .map(
               (item) => `
             <tr>
