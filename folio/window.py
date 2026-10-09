@@ -1,6 +1,7 @@
 """Desktop window that shows the invoicing screen and writes to the database."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -58,6 +59,9 @@ def on_script_message(_manager, result, webview):
         return
     if message.get("type") == "export":
         GLib.idle_add(export_backup, webview, message.get("desk"))
+        return
+    if message.get("type") == "print":
+        GLib.idle_add(print_invoice, webview, message.get("number"))
 
 
 def export_backup(webview, desk):
@@ -92,6 +96,72 @@ def export_backup(webview, desk):
         report.run()
         report.destroy()
     return False
+
+
+def pdf_name(number):
+    cleaned = re.sub(r'[\\/:*?"<>|]+', "-", str(number or "").strip())
+    return f"{cleaned or 'invoice'}.pdf"
+
+
+def print_invoice(webview, number):
+    window = webview.get_toplevel()
+    parent = window if isinstance(window, Gtk.Window) else None
+    dialog = Gtk.FileChooserDialog(
+        title="Save invoice",
+        transient_for=parent,
+        action=Gtk.FileChooserAction.SELECT_FOLDER,
+    )
+    dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+    dialog.add_button("Save", Gtk.ResponseType.ACCEPT)
+    dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+    response = dialog.run()
+    folder = dialog.get_filename() if response == Gtk.ResponseType.ACCEPT else None
+    dialog.destroy()
+    if not folder:
+        return False
+    destination = Path(folder) / pdf_name(number)
+    if destination.exists() and not confirm_replace(parent, destination.name):
+        return False
+    settings = Gtk.PrintSettings()
+    settings.set_printer("Print to File")
+    settings.set(Gtk.PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf")
+    settings.set(Gtk.PRINT_SETTINGS_OUTPUT_URI, destination.resolve().as_uri())
+    operation = WebKit2.PrintOperation.new(webview)
+    page = Gtk.PageSetup()
+    page.set_paper_size(Gtk.PaperSize.new(Gtk.PAPER_NAME_A4))
+    operation.set_page_setup(page)
+    operation.set_print_settings(settings)
+
+    def on_failed(_operation, error):
+        report_error(parent, "Folio could not save the invoice.", str(error))
+
+    operation.connect("failed", on_failed)
+    operation.print_()
+    return False
+
+
+def confirm_replace(parent, name):
+    dialog = Gtk.MessageDialog(
+        transient_for=parent,
+        buttons=Gtk.ButtonsType.OK_CANCEL,
+        message_type=Gtk.MessageType.QUESTION,
+        text=f"Replace {name}?",
+    )
+    response = dialog.run()
+    dialog.destroy()
+    return response == Gtk.ResponseType.OK
+
+
+def report_error(parent, text, detail):
+    report = Gtk.MessageDialog(
+        transient_for=parent,
+        buttons=Gtk.ButtonsType.OK,
+        message_type=Gtk.MessageType.ERROR,
+        text=text,
+    )
+    report.format_secondary_text(detail)
+    report.run()
+    report.destroy()
 
 
 def build_webview():

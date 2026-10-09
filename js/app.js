@@ -794,7 +794,14 @@ function renderEditor() {
     paintLines();
     paintSheet();
   });
-  main.querySelector("#print").addEventListener("click", () => window.print());
+  main.querySelector("#print").addEventListener("click", () => {
+    const bridge = window.webkit?.messageHandlers?.folio;
+    if (bridge) {
+      bridge.postMessage({ type: "print", number: invoice.number });
+      return;
+    }
+    window.print();
+  });
   main.querySelector("#delete")?.addEventListener("click", () => {
     if (!confirm(`Delete ${invoice.number}?`)) return;
     const index = indexFromNumber(invoice.number);
