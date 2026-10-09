@@ -618,15 +618,53 @@ input[type="number"]::-webkit-outer-spin-button {
   min-width: 0;
 }
 
-.line-tools {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .line + .line {
   margin-top: 6px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
+}
+
+.line-summary {
+  display: grid;
+  grid-template-columns: var(--summary-cols);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ink);
+  font-family: var(--serif);
+}
+
+.line.line-summary,
+.line-summary + .line,
+.line + .line.line-summary {
+  margin-top: 0;
+  padding-top: 10px;
+  border-top: 0;
+}
+
+.line-summary-head {
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding-bottom: 8px;
+}
+
+.line-summary .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.line-summary-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--sans);
+}
+
+.line-summary-empty {
+  color: var(--muted);
 }
 
 .line-copy {

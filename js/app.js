@@ -115,6 +115,7 @@ const ui = {
   editingClientId: null,
   clientQuery: "",
   preview: false,
+  editingLineId: null,
 };
 
 const main = document.querySelector("#main");
@@ -668,6 +669,9 @@ function openInvoice(id) {
   ui.view = "editor";
   ui.error = "";
   ui.preview = false;
+  const invoice = currentInvoice();
+  const only = invoice?.items.length === 1 ? invoice.items[0] : null;
+  ui.editingLineId = only && !lineHasData(only) ? only.id : null;
   render();
 }
 
@@ -802,12 +806,21 @@ function renderEditor() {
     });
   });
   main.querySelector("#add-line").addEventListener("click", () => {
+    releaseEmptyLine(invoice);
     const last = invoice.items[invoice.items.length - 1];
-    if (last && !lineHasData(last)) return;
-    invoice.items.push(blankItem());
+    if (last && !lineHasData(last)) {
+      ui.editingLineId = last.id;
+      paintLines();
+      focusEditingLine();
+      return;
+    }
+    const item = blankItem();
+    invoice.items.push(item);
+    ui.editingLineId = item.id;
     save();
     paintLines();
     paintSheet();
+    focusEditingLine();
   });
   main.querySelector("#print").addEventListener("click", () => {
     const bridge = window.webkit?.messageHandlers?.folio;
@@ -842,37 +855,113 @@ function statusActions(invoice) {
   return `<button type="button" class="btn" data-status="sent">Mark unpaid</button>`;
 }
 
+function releaseEmptyLine(invoice) {
+  if (invoice.items.length < 2 || !ui.editingLineId) return;
+  const item = invoice.items.find((entry) => entry.id === ui.editingLineId);
+  if (!item || lineHasData(item)) return;
+  invoice.items = invoice.items.filter((entry) => entry.id !== item.id);
+  ui.editingLineId = null;
+}
+
+function focusEditingLine() {
+  const field = main.querySelector(`#lines [data-item-id="${ui.editingLineId}"][data-item-field="description"]`);
+  if (field) field.focus();
+}
+
+function summaryColumns(items) {
+  return [
+    ["code", "Code"],
+    ["description", "Description"],
+    ["unit", "Unit"],
+    ["qty", "Qty"],
+    ["rate", "Unit price"],
+    ["discount", "Discount"],
+    ["amount", "Amount"],
+  ].filter(([key]) => items.some((item) => columnHasMark(item, key)));
+}
+
+function summaryTemplate(columns) {
+  return [
+    ...columns.map(([key]) => {
+      if (key === "description") return "minmax(120px, 2.2fr)";
+      if (key === "qty") return "minmax(4.8em, 0.7fr)";
+      if (["rate", "discount", "amount"].includes(key)) return "minmax(5.5em, 0.9fr)";
+      return "minmax(72px, 0.8fr)";
+    }),
+    "auto",
+  ].join(" ");
+}
+
+function summaryNum(key) {
+  return ["qty", "rate", "discount", "amount"].includes(key) ? "num" : "";
+}
+
 function paintLines() {
   const invoice = currentInvoice();
   const lines = main.querySelector("#lines");
   if (!invoice || !lines) return;
-  lines.innerHTML = invoice.items
-    .map(
-      (item) => `
-      <div class="line">
-        ${
-          invoice.items.length > 1
-            ? `<div class="line-tools"><button type="button" class="icon-btn" data-remove="${item.id}" aria-label="Remove line">×</button></div>`
-            : ""
-        }
-        <div class="line-copy">
-          <label data-area="code"><span>Code</span><input data-item-id="${item.id}" data-item-field="code" type="text" aria-label="Code" value="${esc(item.code)}" /></label>
-          <label data-area="description"><span>Description</span><input data-item-id="${item.id}" data-item-field="description" type="text" aria-label="Description" value="${esc(item.description)}" /></label>
-          <button type="button" class="btn btn-quiet" data-clear="${item.id}">Clear</button>
-        </div>
-        <div class="line-figures">
-          <label data-area="unit"><span>Unit</span><input data-item-id="${item.id}" data-item-field="unit" type="text" aria-label="Unit" value="${esc(item.unit)}" /></label>
-          <label data-area="qty"><span>Qty</span><input data-item-id="${item.id}" data-item-field="qty" type="number" min="0" step="any" aria-label="Qty" value="${esc(item.qty)}" /></label>
-          <label data-area="rate"><span>Unit price</span><input data-item-id="${item.id}" data-item-field="rate" type="number" min="0" step="any" aria-label="Unit price" value="${esc(item.rate)}" /></label>
-          <label data-area="discount"><span>Discount %</span><input data-item-id="${item.id}" data-item-field="discount" type="number" min="0" step="0.01" aria-label="Discount percent" value="${esc(item.discount)}" /></label>
-        </div>
-      </div>`
-    )
-    .join("");
+  if (ui.editingLineId && !invoice.items.some((item) => item.id === ui.editingLineId)) ui.editingLineId = null;
+  const collapsed = invoice.items.filter((item) => item.id !== ui.editingLineId && lineHasData(item));
+  const columns = summaryColumns(collapsed);
+  const template = summaryTemplate(columns);
+  const canRemove = invoice.items.length > 1;
+  lines.innerHTML = `
+    ${
+      columns.length
+        ? `<div class="line-summary line-summary-head" style="--summary-cols:${template}">
+            ${columns.map(([key, label]) => `<span class="${summaryNum(key)}">${esc(label)}</span>`).join("")}
+            <span></span>
+          </div>`
+        : ""
+    }
+    ${invoice.items
+      .map((item) =>
+        item.id === ui.editingLineId
+          ? `<div class="line">
+              <div class="line-copy">
+                <label data-area="code"><span>Code</span><input data-item-id="${item.id}" data-item-field="code" type="text" aria-label="Code" value="${esc(item.code)}" /></label>
+                <label data-area="description"><span>Description</span><input data-item-id="${item.id}" data-item-field="description" type="text" aria-label="Description" value="${esc(item.description)}" /></label>
+                <button type="button" class="btn btn-quiet" data-clear="${item.id}">Clear</button>
+              </div>
+              <div class="line-figures">
+                <label data-area="unit"><span>Unit</span><input data-item-id="${item.id}" data-item-field="unit" type="text" aria-label="Unit" value="${esc(item.unit)}" /></label>
+                <label data-area="qty"><span>Qty</span><input data-item-id="${item.id}" data-item-field="qty" type="number" min="0" step="any" aria-label="Qty" value="${esc(item.qty)}" /></label>
+                <label data-area="rate"><span>Unit price</span><input data-item-id="${item.id}" data-item-field="rate" type="number" min="0" step="any" aria-label="Unit price" value="${esc(item.rate)}" /></label>
+                <label data-area="discount"><span>Discount %</span><input data-item-id="${item.id}" data-item-field="discount" type="number" min="0" step="0.01" aria-label="Discount percent" value="${esc(item.discount)}" /></label>
+              </div>
+              ${canRemove ? `<div class="line-summary-actions"><button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button></div>` : ""}
+            </div>`
+          : `<div class="line line-summary" style="--summary-cols:${columns.length ? template : "minmax(0, 1fr) auto"}">
+              ${
+                columns.length
+                  ? columns.map(([key]) => `<span class="${summaryNum(key)}">${itemCell(item, key)}</span>`).join("")
+                  : `<span class="line-summary-empty">Line</span>`
+              }
+              <span class="line-summary-actions">
+                <button type="button" class="btn" data-edit="${item.id}">Edit</button>
+                ${canRemove ? `<button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button>` : ""}
+              </span>
+            </div>`
+      )
+      .join("")}`;
+  lines.querySelectorAll("[data-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.edit === ui.editingLineId) return;
+      releaseEmptyLine(invoice);
+      if (!invoice.items.some((item) => item.id === button.dataset.edit)) return;
+      ui.editingLineId = button.dataset.edit;
+      save();
+      paintLines();
+      paintSheet();
+      focusEditingLine();
+    });
+  });
   lines.querySelectorAll("[data-remove]").forEach((button) => {
     button.addEventListener("click", () => {
       if (invoice.items.length === 1) return;
       invoice.items = invoice.items.filter((item) => item.id !== button.dataset.remove);
+      if (ui.editingLineId === button.dataset.remove) ui.editingLineId = null;
+      if (invoice.items.length === 1 && !lineHasData(invoice.items[0])) ui.editingLineId = invoice.items[0].id;
       save();
       paintLines();
       paintSheet();
