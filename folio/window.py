@@ -129,6 +129,10 @@ def print_invoice(webview, number):
     operation = WebKit2.PrintOperation.new(webview)
     page = Gtk.PageSetup()
     page.set_paper_size(Gtk.PaperSize.new(Gtk.PAPER_NAME_A4))
+    page.set_top_margin(0, Gtk.Unit.MM)
+    page.set_bottom_margin(0, Gtk.Unit.MM)
+    page.set_left_margin(0, Gtk.Unit.MM)
+    page.set_right_margin(0, Gtk.Unit.MM)
     operation.set_page_setup(page)
     operation.set_print_settings(settings)
 

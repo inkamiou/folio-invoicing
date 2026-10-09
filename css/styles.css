@@ -1127,18 +1127,30 @@ body.preview-open {
   }
 }
 
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
 @media print {
+  html,
   body {
-    background: white;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 210mm;
+    min-height: 0 !important;
+    height: auto !important;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.45), transparent 80px),
+      var(--sheet);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .rail,
   .editor-form,
   .toolbar,
-  .filters {
-    display: none !important;
-  }
-
+  .filters,
   .sheet-bar {
     display: none !important;
   }
@@ -1156,15 +1168,25 @@ body.preview-open {
   .editor,
   .sheet-wrap {
     display: block;
+    width: auto;
+    min-height: 0 !important;
+    height: auto;
     padding: 0;
     margin: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .sheet {
+    box-sizing: border-box;
     box-shadow: none;
-    width: auto;
-    min-height: 0;
+    width: 210mm;
+    min-width: 0;
+    min-height: calc(297mm - 1px);
+    margin: 0;
     animation: none;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }
 
