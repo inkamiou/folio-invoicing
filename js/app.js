@@ -99,7 +99,7 @@ if (window.__FOLIO_DESK__ && deskIsBlank(window.__FOLIO_DESK__) && !deskIsBlank(
 
 const note = document.querySelector(".rail-note");
 if (note) {
-  note.textContent = window.webkit?.messageHandlers?.folio
+  note.textContent = window.webkit?.messageHandlers?.folio || window.__FOLIO_WIN__
     ? "Saved in the Folio database on this computer."
     : "Stored in this browser only. Open the Folio app to keep a database copy.";
 }
@@ -171,6 +171,7 @@ render();
 function save() {
   const bridge = window.webkit?.messageHandlers?.folio;
   if (bridge) bridge.postMessage({ type: "save", desk: data });
+  else if (window.__FOLIO_WIN__ && window.pywebview?.api?.save) window.pywebview.api.save(data);
   else localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   paintStats();
 }
@@ -1542,10 +1543,15 @@ function paintAccounts() {
   });
 }
 
-function exportBackup() {
+async function exportBackup() {
   const bridge = window.webkit?.messageHandlers?.folio;
   if (bridge) {
     bridge.postMessage({ type: "export", desk: data });
+    return;
+  }
+  if (window.__FOLIO_WIN__ && window.pywebview?.api?.export) {
+    const error = await window.pywebview.api.export(data);
+    if (error) alert(error);
     return;
   }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import uuid
 from pathlib import Path
 
@@ -76,15 +77,23 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 
+def data_folder():
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA")
+        root = Path(base) if base else Path.home() / "AppData" / "Local"
+        return root / "Folio"
+    base = os.environ.get("XDG_DATA_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "share"
+    return root / "folio"
+
+
 def database_path():
     override = os.environ.get("FOLIO_DB")
     if override:
         path = Path(override)
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
-    base = os.environ.get("XDG_DATA_HOME")
-    root = Path(base) if base else Path.home() / ".local" / "share"
-    folder = root / "folio"
+    folder = data_folder()
     folder.mkdir(parents=True, exist_ok=True)
     return folder / "folio.db"
 
