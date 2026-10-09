@@ -1219,6 +1219,11 @@ function paintAccounts() {
 }
 
 function exportBackup() {
+  const bridge = window.webkit?.messageHandlers?.folio;
+  if (bridge) {
+    bridge.postMessage({ type: "export", desk: data });
+    return;
+  }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
