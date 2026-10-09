@@ -104,6 +104,7 @@ const ui = {
   filter: "all",
   query: "",
   error: "",
+  editingClientId: null,
 };
 
 const main = document.querySelector("#main");
@@ -855,7 +856,10 @@ function renderClients() {
           <label><span>Registration no.</span><input name="registrationNumber" type="text" /></label>
           <label><span>Tax ID</span><input name="taxId" type="text" /></label>
         </div>
-        <div><button class="btn btn-primary" type="submit">Add client</button></div>
+        <div class="actions">
+          <button class="btn btn-primary" type="submit" id="client-submit">Add client</button>
+          <button type="button" class="btn" id="cancel-client" hidden>Cancel</button>
+        </div>
       </form>
       <div class="client-list" id="client-list"></div>
     </div>
@@ -866,18 +870,50 @@ function renderClients() {
     const form = event.currentTarget;
     const name = form.name.value.trim();
     if (!name) return;
-    data.clients.push({
-      id: uid(),
+    const details = {
       name,
       email: form.email.value.trim(),
       address: form.address.value.trim(),
       registrationNumber: form.registrationNumber.value.trim(),
       taxId: form.taxId.value.trim(),
-    });
+    };
+    const existing = data.clients.find((client) => client.id === ui.editingClientId);
+    if (existing) Object.assign(existing, details);
+    else data.clients.push({ id: uid(), ...details });
+    ui.editingClientId = null;
     save();
-    form.reset();
+    resetClientForm();
     paintClients();
   });
+  main.querySelector("#cancel-client").addEventListener("click", () => {
+    ui.editingClientId = null;
+    resetClientForm();
+  });
+}
+
+function resetClientForm() {
+  const form = main.querySelector("#client-form");
+  if (!form) return;
+  form.reset();
+  const submit = main.querySelector("#client-submit");
+  const cancel = main.querySelector("#cancel-client");
+  if (submit) submit.textContent = "Add client";
+  if (cancel) cancel.hidden = true;
+}
+
+function editClient(id) {
+  const client = data.clients.find((item) => item.id === id);
+  const form = main.querySelector("#client-form");
+  if (!client || !form) return;
+  ui.editingClientId = client.id;
+  form.name.value = client.name || "";
+  form.email.value = client.email || "";
+  form.address.value = client.address || "";
+  form.registrationNumber.value = client.registrationNumber || "";
+  form.taxId.value = client.taxId || "";
+  main.querySelector("#client-submit").textContent = "Save changes";
+  main.querySelector("#cancel-client").hidden = false;
+  form.name.focus();
 }
 
 function paintClients() {
@@ -904,10 +940,16 @@ function paintClients() {
               .join(" · ")
           )}</p>
         </div>
-        <button type="button" class="btn btn-danger" data-remove-client="${client.id}">Remove</button>
+        <div class="client-actions">
+          <button type="button" class="btn" data-edit-client="${client.id}">Edit</button>
+          <button type="button" class="btn btn-danger" data-remove-client="${client.id}">Remove</button>
+        </div>
       </article>`
     )
     .join("");
+  list.querySelectorAll("[data-edit-client]").forEach((button) => {
+    button.addEventListener("click", () => editClient(button.dataset.editClient));
+  });
   list.querySelectorAll("[data-remove-client]").forEach((button) => {
     button.addEventListener("click", () => {
       const used = data.invoices.some((invoice) => invoice.clientId === button.dataset.removeClient);
@@ -916,6 +958,10 @@ function paintClients() {
         return;
       }
       data.clients = data.clients.filter((client) => client.id !== button.dataset.removeClient);
+      if (ui.editingClientId === button.dataset.removeClient) {
+        ui.editingClientId = null;
+        resetClientForm();
+      }
       save();
       paintClients();
     });
