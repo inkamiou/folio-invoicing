@@ -921,13 +921,13 @@ function paintLines() {
               <div class="line-copy">
                 <label data-area="code"><span>Code</span><input data-item-id="${item.id}" data-item-field="code" type="text" aria-label="Code" value="${esc(item.code)}" /></label>
                 <label data-area="description"><span>Description</span><input data-item-id="${item.id}" data-item-field="description" type="text" aria-label="Description" value="${esc(item.description)}" /></label>
+                <div class="line-figures">
+                  <label data-area="unit"><span>Unit</span><input data-item-id="${item.id}" data-item-field="unit" type="text" aria-label="Unit" value="${esc(item.unit)}" /></label>
+                  <label data-area="qty"><span>Qty</span><input data-item-id="${item.id}" data-item-field="qty" type="number" min="0" step="any" aria-label="Qty" value="${esc(item.qty)}" /></label>
+                  <label data-area="rate"><span>Unit price</span><input data-item-id="${item.id}" data-item-field="rate" type="number" min="0" step="any" aria-label="Unit price" value="${esc(item.rate)}" /></label>
+                  <label data-area="discount"><span>Discount %</span><input data-item-id="${item.id}" data-item-field="discount" type="number" min="0" step="0.01" aria-label="Discount percent" value="${esc(item.discount)}" /></label>
+                </div>
                 <button type="button" class="btn btn-quiet" data-clear="${item.id}">Clear</button>
-              </div>
-              <div class="line-figures">
-                <label data-area="unit"><span>Unit</span><input data-item-id="${item.id}" data-item-field="unit" type="text" aria-label="Unit" value="${esc(item.unit)}" /></label>
-                <label data-area="qty"><span>Qty</span><input data-item-id="${item.id}" data-item-field="qty" type="number" min="0" step="any" aria-label="Qty" value="${esc(item.qty)}" /></label>
-                <label data-area="rate"><span>Unit price</span><input data-item-id="${item.id}" data-item-field="rate" type="number" min="0" step="any" aria-label="Unit price" value="${esc(item.rate)}" /></label>
-                <label data-area="discount"><span>Discount %</span><input data-item-id="${item.id}" data-item-field="discount" type="number" min="0" step="0.01" aria-label="Discount percent" value="${esc(item.discount)}" /></label>
               </div>
               ${canRemove ? `<div class="line-summary-actions"><button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button></div>` : ""}
             </div>`
@@ -973,6 +973,10 @@ function paintLines() {
       if (!item) return;
       item.code = "";
       item.description = "";
+      item.unit = "";
+      item.qty = "";
+      item.rate = "";
+      item.discount = "";
       save();
       paintLines();
       paintSheet();
