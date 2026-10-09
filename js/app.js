@@ -237,6 +237,25 @@ function formatInvoiceNumber(index) {
   return `${template}${padded}`;
 }
 
+function indexFromNumber(number) {
+  const text = String(number || "").trim();
+  if (!text) return null;
+  const template = String(data.business.invoiceTemplate || "").trim();
+  const pattern = template
+    ? new RegExp(
+        `^${(/\{nr\}/i.test(template) ? template : `${template}{nr}`)
+          .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          .replace(/\\\{nr\\\}/gi, "(\\d+)")}$`,
+        "i"
+      )
+    : /^INV-\d{4}-(\d+)$/i;
+  const matched = text.match(pattern);
+  const digits = matched ? matched.slice(1).find(Boolean) : /^\d+$/.test(text) ? text : "";
+  const index = Number(digits);
+  if (!Number.isInteger(index) || index < 1 || index > 999999999999) return null;
+  return index;
+}
+
 function invoiceNumberTaken(number, exceptId) {
   const key = String(number || "").trim().toLowerCase();
   if (!key) return false;
@@ -570,12 +589,29 @@ function renderEditor() {
     render();
   });
   main.querySelector("#invoice-form").addEventListener("input", onInvoiceInput);
-  main.querySelector('[data-field="number"]').addEventListener("blur", (event) => {
-    if (!invoiceNumberTaken(event.target.value, invoice.id)) return;
-    event.target.value = invoice.number;
-    ui.error = "";
-    const error = main.querySelector("#form-error");
-    if (error) error.textContent = "";
+  const numberInput = main.querySelector('[data-field="number"]');
+  numberInput.dataset.settled = numberInput.value.trim();
+  numberInput.addEventListener("blur", (event) => {
+    if (invoiceNumberTaken(event.target.value, invoice.id)) {
+      event.target.value = invoice.number;
+      ui.error = "";
+      const error = main.querySelector("#form-error");
+      if (error) error.textContent = "";
+      return;
+    }
+    const typed = event.target.value.trim();
+    if (typed === event.target.dataset.settled) return;
+    event.target.dataset.settled = typed;
+    const index = indexFromNumber(typed);
+    if (index == null) return;
+    const following = index + 1;
+    if (following === nextNumberValue()) return;
+    const approved = confirm(
+      `Set the next invoice number to ${formatInvoiceNumber(following)}? It is currently ${formatInvoiceNumber(nextNumberValue())}.`
+    );
+    if (!approved) return;
+    data.nextNumber = following;
+    save();
   });
   main.querySelector("#add-line").addEventListener("click", () => {
     invoice.items.push(blankItem());
