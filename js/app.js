@@ -734,7 +734,7 @@ function renderEditor() {
         </div>
         <div class="stack">
           <div class="editor-identity">
-            <label><span>Number</span><input data-field="number" type="text" value="${esc(invoice.number)}" required /></label>
+            <label><span>Supplier</span><input data-field="number" type="text" aria-label="Supplier" value="${esc(invoice.number)}" required /></label>
             <label><span>Client</span>
               <select data-field="clientId">
                 <option value="">Select a client</option>
