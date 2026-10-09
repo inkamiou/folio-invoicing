@@ -437,10 +437,19 @@ input[type="number"]::-webkit-outer-spin-button {
   gap: 12px;
 }
 
+.client-tools {
+  margin-top: 22px;
+}
+
+#client-search[hidden],
+#show-client-search[hidden] {
+  display: none;
+}
+
 .client-list {
   display: grid;
   gap: 8px;
-  margin-top: 22px;
+  margin-top: 14px;
 }
 
 .client-card {

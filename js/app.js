@@ -105,6 +105,7 @@ const ui = {
   query: "",
   error: "",
   editingClientId: null,
+  clientQuery: "",
 };
 
 const main = document.querySelector("#main");
@@ -859,6 +860,10 @@ function renderClients() {
           <button type="button" class="btn" id="cancel-client" hidden>Cancel</button>
         </div>
       </form>
+      <div class="client-tools">
+        <button type="button" class="btn btn-quiet" id="show-client-search" ${ui.clientQuery ? "hidden" : ""}>Search</button>
+        <input id="client-search" class="search" type="search" placeholder="Name, email, or tax ID" value="${esc(ui.clientQuery)}" ${ui.clientQuery ? "" : "hidden"} />
+      </div>
       <div class="client-list" id="client-list"></div>
     </div>
   `;
@@ -887,6 +892,28 @@ function renderClients() {
     ui.editingClientId = null;
     resetClientForm();
   });
+  main.querySelector("#show-client-search").addEventListener("click", () => {
+    const button = main.querySelector("#show-client-search");
+    const field = main.querySelector("#client-search");
+    button.hidden = true;
+    field.hidden = false;
+    field.focus();
+  });
+  main.querySelector("#client-search").addEventListener("input", (event) => {
+    ui.clientQuery = event.target.value;
+    paintClients();
+  });
+}
+
+function visibleClients() {
+  const query = ui.clientQuery.trim().toLowerCase();
+  if (!query) return data.clients;
+  return data.clients.filter((client) =>
+    [client.name, client.email, client.address, client.registrationNumber, client.taxId]
+      .join(" ")
+      .toLowerCase()
+      .includes(query)
+  );
 }
 
 function resetClientForm() {
@@ -917,11 +944,16 @@ function editClient(id) {
 function paintClients() {
   const list = main.querySelector("#client-list");
   if (!list) return;
+  const clients = visibleClients();
   if (!data.clients.length) {
     list.innerHTML = `<div class="empty"><h3>No clients yet</h3><p>Add one before you send an invoice.</p></div>`;
     return;
   }
-  list.innerHTML = data.clients
+  if (!clients.length) {
+    list.innerHTML = `<div class="empty"><h3>No matches</h3><p>Try a different name, email, or tax ID.</p></div>`;
+    return;
+  }
+  list.innerHTML = clients
     .map(
       (client) => `
       <article class="client-card">
