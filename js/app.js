@@ -318,20 +318,30 @@ function roundMoney(value) {
   return Math.round((Number(value) || 0) * factor) / factor;
 }
 
-function lineAmount(item) {
+function lineGross(item) {
   const qty = Number(item.qty);
   const rate = Number(item.rate);
   if (!Number.isFinite(qty) || !Number.isFinite(rate)) return 0;
-  const gross = qty * rate;
-  const discount = hasMark(item.discount) ? Number(item.discount) : 0;
-  const off = Number.isFinite(discount) ? gross * (discount / 100) : 0;
-  return roundMoney(gross - off);
+  return qty * rate;
+}
+
+function lineDiscountAmount(item) {
+  if (!hasMark(item.discount)) return 0;
+  const discount = Number(item.discount);
+  if (!Number.isFinite(discount)) return 0;
+  return roundMoney(lineGross(item) * (discount / 100));
+}
+
+function lineAmount(item) {
+  if (!lineGross(item)) return 0;
+  return roundMoney(lineGross(item) - lineDiscountAmount(item));
 }
 
 function totals(invoice) {
+  const discount = roundMoney(invoice.items.reduce((sum, item) => sum + lineDiscountAmount(item), 0));
   const subtotal = roundMoney(invoice.items.reduce((sum, item) => sum + lineAmount(item), 0));
   const tax = roundMoney(subtotal * ((Number(invoice.taxRate) || 0) / 100));
-  return { subtotal, tax, total: roundMoney(subtotal + tax) };
+  return { discount, subtotal, tax, total: roundMoney(subtotal + tax) };
 }
 
 function money(amount) {
@@ -826,6 +836,7 @@ Due ${esc(invoice.dueDate || "—")}</p>
           : ""
       }
       <div class="totals">
+        ${sums.discount ? `<div><span>Discount</span><span>−${money(sums.discount)}</span></div>` : ""}
         <div><span>Subtotal</span><span>${money(sums.subtotal)}</span></div>
         <div><span>Tax ${esc(invoice.taxRate)}%</span><span>${money(sums.tax)}</span></div>
         <div class="grand"><span>Total</span><span>${money(sums.total)}</span></div>
