@@ -848,10 +848,8 @@ function renderClients() {
       <p class="lede">People and companies you bill.</p>
       <form id="client-form" class="stack" style="margin-top:18px">
         <label><span>Name</span><input name="name" type="text" required /></label>
-        <div class="grid-2">
-          <label><span>Email</span><input name="email" type="email" /></label>
-          <label><span>Address</span><input name="address" type="text" /></label>
-        </div>
+        <label><span>Email</span><input name="email" type="email" /></label>
+        <label><span>Address</span><textarea name="address"></textarea></label>
         <div class="grid-2">
           <label><span>Registration no.</span><input name="registrationNumber" type="text" /></label>
           <label><span>Tax ID</span><input name="taxId" type="text" /></label>
