@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS business (
   extra_currencies TEXT NOT NULL DEFAULT '[]',
   tax_rate REAL NOT NULL DEFAULT 0,
   invoice_template TEXT NOT NULL DEFAULT '',
-  number_length INTEGER NOT NULL DEFAULT 3
+  number_length INTEGER NOT NULL DEFAULT 3,
+  date_format TEXT NOT NULL DEFAULT 'iso'
 );
 
 CREATE TABLE IF NOT EXISTS clients (
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   notes TEXT NOT NULL DEFAULT '',
   tax_rate REAL NOT NULL DEFAULT 0,
   issued INTEGER NOT NULL DEFAULT 0,
+  date_format TEXT NOT NULL DEFAULT 'iso',
   position INTEGER NOT NULL
 );
 
@@ -101,6 +103,8 @@ def ensure_columns(connection):
         ("business", "extra_currencies", "TEXT NOT NULL DEFAULT '[]'"),
         ("business", "invoice_template", "TEXT NOT NULL DEFAULT ''"),
         ("business", "number_length", "INTEGER NOT NULL DEFAULT 3"),
+        ("business", "date_format", "TEXT NOT NULL DEFAULT 'iso'"),
+        ("invoices", "date_format", "TEXT NOT NULL DEFAULT 'iso'"),
         ("clients", "registration_number", "TEXT NOT NULL DEFAULT ''"),
         ("clients", "tax_id", "TEXT NOT NULL DEFAULT ''"),
         ("invoices", "issued", "INTEGER NOT NULL DEFAULT 0"),
@@ -204,6 +208,7 @@ def empty_desk():
             "taxRate": 0,
             "invoiceTemplate": "",
             "numberLength": 3,
+            "dateFormat": "iso",
             "accounts": [],
         },
         "clients": [],
@@ -251,6 +256,11 @@ def _logo(value):
 def _template(value):
     text = re.sub(r"[\x00-\x1f]", "", _text(value)).strip()
     return text[:80]
+
+
+def _date_format(value):
+    text = _text(value).strip()
+    return text if text in {"iso", "dmy", "mdy"} else "iso"
 
 
 def _number_length(value):
@@ -310,6 +320,7 @@ def load_desk():
                 "taxRate": business_row["tax_rate"],
                 "invoiceTemplate": _template(business_row["invoice_template"]),
                 "numberLength": _number_length(business_row["number_length"]),
+                "dateFormat": _date_format(business_row["date_format"]),
             }
         accounts = [
             {
@@ -360,6 +371,7 @@ def load_desk():
                     "notes": invoice["notes"],
                     "taxRate": invoice["tax_rate"],
                     "issued": bool(invoice["issued"]),
+                    "dateFormat": _date_format(invoice["date_format"]),
                     "items": items,
                 }
             )
@@ -399,8 +411,8 @@ def save_desk(desk):
             """
             INSERT INTO business (
               id, name, email, phone, address, tax_id, registration_number, logo, currency, extra_currencies, tax_rate,
-              invoice_template, number_length
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              invoice_template, number_length, date_format
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
               email = excluded.email,
@@ -413,7 +425,8 @@ def save_desk(desk):
               extra_currencies = excluded.extra_currencies,
               tax_rate = excluded.tax_rate,
               invoice_template = excluded.invoice_template,
-              number_length = excluded.number_length
+              number_length = excluded.number_length,
+              date_format = excluded.date_format
             """,
             (
                 _text(business.get("name")),
@@ -428,6 +441,7 @@ def save_desk(desk):
                 _number(business.get("taxRate")),
                 _template(business.get("invoiceTemplate")),
                 _number_length(business.get("numberLength")),
+                _date_format(business.get("dateFormat")),
             ),
         )
         accounts = business.get("accounts") if isinstance(business.get("accounts"), list) else []
@@ -473,8 +487,8 @@ def save_desk(desk):
             connection.execute(
                 """
                 INSERT INTO invoices (
-                  id, number, client_id, issue_date, due_date, status, notes, tax_rate, issued, position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  id, number, client_id, issue_date, due_date, status, notes, tax_rate, issued, date_format, position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     invoice_id,
@@ -486,6 +500,7 @@ def save_desk(desk):
                     _text(invoice.get("notes")),
                     _number(invoice.get("taxRate")),
                     1 if invoice.get("issued") or (_text(invoice.get("status")) or "draft") != "draft" else 0,
+                    _date_format(invoice.get("dateFormat")),
                     position,
                 ),
             )

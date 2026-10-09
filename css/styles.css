@@ -361,6 +361,39 @@ textarea {
   font-synthesis: none;
 }
 
+.date-field {
+  position: relative;
+  display: block;
+}
+
+.date-field input[type="text"] {
+  padding-right: 36px;
+}
+
+.date-field input[type="date"] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40px;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+}
+
+.date-field input[type="date"]::-webkit-datetime-edit,
+.date-field input[type="date"]::-webkit-inner-spin-button {
+  display: none;
+}
+
+.date-field input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  margin: 0;
+}
+
 input[type="number"] {
   -webkit-appearance: textfield;
   appearance: textfield;

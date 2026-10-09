@@ -28,6 +28,7 @@ function emptyDesk() {
       taxRate: 0,
       invoiceTemplate: "",
       numberLength: 3,
+      dateFormat: "iso",
       accounts: [],
     },
     clients: [],
@@ -72,9 +73,11 @@ function adoptTaxId(party) {
 function prepareDesk(desk) {
   if (!desk) return desk;
   adoptTaxId(desk.business);
+  if (desk.business) desk.business.dateFormat = knownDateFormat(desk.business.dateFormat);
   (desk.clients || []).forEach(adoptTaxId);
   (desk.invoices || []).forEach((invoice) => {
     invoice.issued = Boolean(invoice.issued) || invoice.status !== "draft";
+    invoice.dateFormat = knownDateFormat(invoice.dateFormat);
   });
   return desk;
 }
@@ -157,6 +160,56 @@ function save() {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function knownDateFormat(value) {
+  return value === "dmy" || value === "mdy" ? value : "iso";
+}
+
+function dateFormat() {
+  return knownDateFormat(data.business.dateFormat);
+}
+
+function invoiceDateFormat(invoice) {
+  return knownDateFormat(invoice?.dateFormat);
+}
+
+function formatDate(value, format) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || "").trim());
+  if (!match) return "";
+  const [, year, month, day] = match;
+  const chosen = knownDateFormat(format);
+  if (chosen === "mdy") return `${month}/${day}/${year}`;
+  if (chosen === "dmy") return `${day}.${month}.${year}`;
+  return `${year}-${month}-${day}`;
+}
+
+function parseDate(value, format) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const chosen = knownDateFormat(format);
+  const parts =
+    chosen === "mdy"
+      ? /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text)
+      : chosen === "dmy"
+        ? /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(text)
+        : null;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const year = Number(parts ? parts[3] : iso?.[1]);
+  const month = Number(parts ? (chosen === "mdy" ? parts[1] : parts[2]) : iso?.[2]);
+  const day = Number(parts ? (chosen === "mdy" ? parts[2] : parts[1]) : iso?.[3]);
+  if (!parts && !iso) return null;
+  if (!Number.isInteger(year) || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function datePattern(format) {
+  const chosen = knownDateFormat(format);
+  if (chosen === "mdy") return "MM/DD/YYYY";
+  if (chosen === "dmy") return "DD.MM.YYYY";
+  return "YYYY-MM-DD";
 }
 
 function plusDays(days) {
@@ -303,6 +356,7 @@ function createInvoice() {
     dueDate: plusDays(14),
     status: "draft",
     issued: false,
+    dateFormat: dateFormat(),
     notes: "",
     taxRate: Number(data.business.taxRate) || 0,
     items: [blankItem()],
@@ -513,8 +567,8 @@ function paintInvoiceRows() {
         <tr class="invoice-row" data-open="${invoice.id}">
           <td class="num"><button type="button" class="row-open" data-open="${invoice.id}">${esc(invoice.number)}</button></td>
           <td>${esc(client?.name || "No client")}</td>
-          <td>${esc(invoice.issueDate)}</td>
-          <td>${esc(invoice.dueDate)}</td>
+          <td>${esc(formatDate(invoice.issueDate, invoice.dateFormat))}</td>
+          <td>${esc(formatDate(invoice.dueDate, invoice.dateFormat))}</td>
           <td><span class="status status-${status}">${status}</span></td>
           <td class="amount">${money(totals(invoice).total)}</td>
         </tr>
@@ -576,8 +630,8 @@ function renderEditor() {
             </select>
           </label>
           <div class="grid-2">
-            <label><span>Issued</span><input data-field="issueDate" type="date" value="${esc(invoice.issueDate)}" /></label>
-            <label><span>Due</span><input data-field="dueDate" type="date" value="${esc(invoice.dueDate)}" /></label>
+            <label><span>Issued</span><span class="date-field"><input data-field="issueDate" type="text" inputmode="numeric" maxlength="10" placeholder="${datePattern(invoice.dateFormat)}" value="${esc(formatDate(invoice.issueDate, invoice.dateFormat))}" autocomplete="off" /><input data-date-for="issueDate" type="date" value="${esc(invoice.issueDate)}" aria-label="Choose issue date" /></span></label>
+            <label><span>Due</span><span class="date-field"><input data-field="dueDate" type="text" inputmode="numeric" maxlength="10" placeholder="${datePattern(invoice.dateFormat)}" value="${esc(formatDate(invoice.dueDate, invoice.dateFormat))}" autocomplete="off" /><input data-date-for="dueDate" type="date" value="${esc(invoice.dueDate)}" aria-label="Choose due date" /></span></label>
           </div>
           <div>
             <div class="lines" id="lines"></div>
@@ -620,6 +674,31 @@ function renderEditor() {
     event.target.dataset.settled = typed;
     if (!invoice.issued) return;
     if (confirmNextNumber(indexFromNumber(typed))) save();
+  });
+  main.querySelectorAll("[data-field='issueDate'], [data-field='dueDate']").forEach((field) => {
+    field.addEventListener("blur", () => {
+      const parsed = parseDate(field.value, invoice.dateFormat);
+      if (parsed == null) {
+        field.value = formatDate(invoice[field.dataset.field], invoice.dateFormat);
+        return;
+      }
+      invoice[field.dataset.field] = parsed;
+      field.value = formatDate(parsed, invoice.dateFormat);
+      const picker = main.querySelector(`[data-date-for="${field.dataset.field}"]`);
+      if (picker) picker.value = parsed;
+      save();
+      paintSheet();
+    });
+  });
+  main.querySelectorAll("[data-date-for]").forEach((picker) => {
+    picker.addEventListener("input", () => {
+      const field = picker.dataset.dateFor;
+      invoice[field] = picker.value;
+      const text = main.querySelector(`[data-field="${field}"]`);
+      if (text) text.value = formatDate(picker.value, invoice.dateFormat);
+      save();
+      paintSheet();
+    });
   });
   main.querySelector("#add-line").addEventListener("click", () => {
     invoice.items.push(blankItem());
@@ -696,7 +775,13 @@ function onInvoiceInput(event) {
       if (error) error.textContent = ui.error;
       return;
     }
-    invoice[target.dataset.field] = target.type === "number" ? Number(target.value) : target.dataset.field === "number" ? target.value.trim() : target.value;
+    if (target.dataset.field === "issueDate" || target.dataset.field === "dueDate") {
+      const parsed = parseDate(target.value, invoice.dateFormat);
+      if (parsed == null) return;
+      invoice[target.dataset.field] = parsed;
+      const picker = main.querySelector(`[data-date-for="${target.dataset.field}"]`);
+      if (picker) picker.value = parsed;
+    } else invoice[target.dataset.field] = target.type === "number" ? Number(target.value) : target.dataset.field === "number" ? target.value.trim() : target.value;
   }
   if (target.dataset.itemField) {
     const item = invoice.items.find((entry) => entry.id === target.dataset.itemId);
@@ -856,7 +941,7 @@ function paintSheet({ animate = false } = {}) {
         </div>
         <div>
           <h3>Dates</h3>
-          <p>${sheetText(`Issued ${invoice.issueDate || "—"}\nDue ${invoice.dueDate || "—"}`)}</p>
+          <p>${sheetText(`Issued ${formatDate(invoice.issueDate, invoice.dateFormat) || "—"}\nDue ${formatDate(invoice.dueDate, invoice.dateFormat) || "—"}`)}</p>
         </div>
       </section>
       ${
@@ -1109,6 +1194,16 @@ function renderBusiness() {
           </label>
           <label><span>Default tax %</span><input data-business="taxRate" type="number" min="0" step="any" value="${esc(business.taxRate)}" /></label>
         </div>
+        <div class="grid-2">
+          <label><span>Date format</span>
+            <select data-business="dateFormat">
+              <option value="iso" ${dateFormat() === "iso" ? "selected" : ""}>ISO — YYYY-MM-DD</option>
+              <option value="dmy" ${dateFormat() === "dmy" ? "selected" : ""}>European — DD.MM.YYYY</option>
+              <option value="mdy" ${dateFormat() === "mdy" ? "selected" : ""}>North America — MM/DD/YYYY</option>
+            </select>
+            <p class="hint">New invoices use this format. Existing invoices keep theirs.</p>
+          </label>
+        </div>
         <div>
           <button type="button" class="btn btn-quiet" id="show-currency">Add Currency</button>
           <div id="currency-form" hidden>
@@ -1146,6 +1241,7 @@ function renderBusiness() {
     }
     if (!field) return;
     if (field === "taxRate") data.business[field] = Number(event.target.value);
+    else if (field === "dateFormat") data.business.dateFormat = knownDateFormat(event.target.value);
     else if (field === "numberLength") {
       const length = Math.round(Number(event.target.value));
       if (Number.isFinite(length) && length >= 1) data.business.numberLength = Math.min(12, length);
