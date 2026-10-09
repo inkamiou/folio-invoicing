@@ -112,6 +112,7 @@ const ui = {
   error: "",
   editingClientId: null,
   clientQuery: "",
+  preview: false,
 };
 
 const main = document.querySelector("#main");
@@ -120,6 +121,8 @@ document.querySelectorAll("[data-nav]").forEach((button) => {
   button.addEventListener("click", () => {
     ui.view = button.dataset.nav;
     ui.error = "";
+    ui.preview = false;
+    document.body.classList.remove("preview-open");
     render();
   });
 });
@@ -137,6 +140,18 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && ui.preview) {
+    ui.preview = false;
+    document.body.classList.remove("preview-open");
+    const wrap = document.querySelector("#sheet-wrap");
+    const button = document.querySelector("#draft-preview");
+    if (wrap) wrap.hidden = true;
+    if (button) {
+      button.setAttribute("aria-pressed", "false");
+      button.focus();
+    }
+    return;
+  }
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
@@ -595,6 +610,7 @@ function openInvoice(id) {
   ui.invoiceId = id;
   ui.view = "editor";
   ui.error = "";
+  ui.preview = false;
   render();
 }
 
@@ -619,17 +635,22 @@ function renderEditor() {
         <button type="button" class="back" id="back">← Invoices</button>
         <div class="editor-head">
           <h2>Edit</h2>
-          <span class="status status-${statusLabel(invoice)}">${statusLabel(invoice)}</span>
+          <div class="editor-tools">
+            <button type="button" class="btn" id="draft-preview" aria-pressed="${ui.preview}">Draft Preview</button>
+            <span class="status status-${statusLabel(invoice)}">${statusLabel(invoice)}</span>
+          </div>
         </div>
         <div class="stack">
-          <label><span>Number</span><input data-field="number" type="text" value="${esc(invoice.number)}" required /></label>
-          <label><span>Client</span>
-            <select data-field="clientId">
-              <option value="">Select a client</option>
-              ${clientOptions}
-            </select>
-          </label>
-          <div class="grid-2">
+          <div class="editor-identity">
+            <label><span>Number</span><input data-field="number" type="text" value="${esc(invoice.number)}" required /></label>
+            <label><span>Client</span>
+              <select data-field="clientId">
+                <option value="">Select a client</option>
+                ${clientOptions}
+              </select>
+            </label>
+          </div>
+          <div class="editor-dates">
             <label><span>Issued</span><span class="date-field"><input data-field="issueDate" type="text" inputmode="numeric" maxlength="10" placeholder="${datePattern(invoice.dateFormat)}" value="${esc(formatDate(invoice.issueDate, invoice.dateFormat))}" autocomplete="off" /><input data-date-for="issueDate" type="date" value="${esc(invoice.issueDate)}" aria-label="Choose issue date" /></span></label>
             <label><span>Due</span><span class="date-field"><input data-field="dueDate" type="text" inputmode="numeric" maxlength="10" placeholder="${datePattern(invoice.dateFormat)}" value="${esc(formatDate(invoice.dueDate, invoice.dateFormat))}" autocomplete="off" /><input data-date-for="dueDate" type="date" value="${esc(invoice.dueDate)}" aria-label="Choose due date" /></span></label>
           </div>
@@ -637,7 +658,7 @@ function renderEditor() {
             <div class="lines" id="lines"></div>
             <button type="button" class="btn btn-quiet" id="add-line">Add line</button>
           </div>
-          <label><span>Tax %</span><input data-field="taxRate" type="number" min="0" step="any" value="${esc(invoice.taxRate)}" /></label>
+          <label class="field-tax"><span>Tax %</span><input data-field="taxRate" type="number" min="0" step="any" value="${esc(invoice.taxRate)}" /></label>
           <label><span>Notes</span><textarea data-field="notes">${esc(invoice.notes)}</textarea></label>
         </div>
         <p class="form-error" id="form-error">${esc(ui.error)}</p>
@@ -647,16 +668,39 @@ function renderEditor() {
           ${invoice.status === "draft" ? `<button type="button" class="btn btn-danger" id="delete">Delete</button>` : ""}
         </div>
       </form>
-      <div class="sheet-wrap" id="sheet-wrap"></div>
+      <div class="sheet-wrap" id="sheet-wrap" ${ui.preview ? "" : "hidden"}>
+        <div class="sheet-bar"><button type="button" class="btn" id="close-preview">Close</button></div>
+        <div id="sheet-page"></div>
+      </div>
     </div>
   `;
 
   paintLines();
-  paintSheet({ animate: true });
+  paintSheet({ animate: ui.preview });
+  document.body.classList.toggle("preview-open", ui.preview);
 
+  const setPreview = (open) => {
+    ui.preview = open;
+    const wrap = main.querySelector("#sheet-wrap");
+    const button = main.querySelector("#draft-preview");
+    wrap.hidden = !open;
+    button.setAttribute("aria-pressed", String(open));
+    document.body.classList.toggle("preview-open", open);
+    if (open) {
+      paintSheet({ animate: true });
+      main.querySelector("#close-preview").focus();
+    } else button.focus();
+  };
   main.querySelector("#back").addEventListener("click", () => {
     ui.view = "invoices";
+    ui.preview = false;
+    document.body.classList.remove("preview-open");
     render();
+  });
+  main.querySelector("#draft-preview").addEventListener("click", () => setPreview(!ui.preview));
+  main.querySelector("#close-preview").addEventListener("click", () => setPreview(false));
+  main.querySelector("#sheet-wrap").addEventListener("click", (event) => {
+    if (event.target.id === "sheet-wrap") setPreview(false);
   });
   main.querySelector("#invoice-form").addEventListener("input", onInvoiceInput);
   const numberInput = main.querySelector('[data-field="number"]');
@@ -865,7 +909,7 @@ function sheetLabel(label) {
 
 function paintSheet({ animate = false } = {}) {
   const invoice = currentInvoice();
-  const wrap = main.querySelector("#sheet-wrap");
+  const wrap = main.querySelector("#sheet-page");
   if (!invoice || !wrap) return;
   const client = clientById(invoice.clientId);
   const business = data.business;
