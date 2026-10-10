@@ -26,6 +26,25 @@ CREATE TABLE IF NOT EXISTS business (
   date_format TEXT NOT NULL DEFAULT 'iso'
 );
 
+CREATE TABLE IF NOT EXISTS businesses (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  tax_id TEXT NOT NULL DEFAULT '',
+  registration_number TEXT NOT NULL DEFAULT '',
+  logo TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT 'EUR',
+  extra_currencies TEXT NOT NULL DEFAULT '[]',
+  tax_rate REAL NOT NULL DEFAULT 0,
+  invoice_template TEXT NOT NULL DEFAULT '',
+  number_length INTEGER NOT NULL DEFAULT 3,
+  date_format TEXT NOT NULL DEFAULT 'iso',
+  next_number INTEGER NOT NULL DEFAULT 1,
+  position INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS clients (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -118,6 +137,8 @@ def ensure_columns(connection):
         ("clients", "registration_number", "TEXT NOT NULL DEFAULT ''"),
         ("clients", "tax_id", "TEXT NOT NULL DEFAULT ''"),
         ("invoices", "issued", "INTEGER NOT NULL DEFAULT 0"),
+        ("invoices", "business_id", "TEXT NOT NULL DEFAULT ''"),
+        ("bank_accounts", "business_id", "TEXT NOT NULL DEFAULT ''"),
         ("invoice_items", "tax", "REAL"),
     )
     for table, column, definition in additions:
@@ -195,6 +216,65 @@ def fold_vat_into_tax_id(connection):
         )
 
 
+def migrate_businesses(connection):
+    if connection.execute("SELECT COUNT(*) AS n FROM businesses").fetchone()["n"]:
+        return
+    row = connection.execute("SELECT * FROM business WHERE id = 1").fetchone()
+    if row is None:
+        return
+    accounts = connection.execute("SELECT COUNT(*) AS n FROM bank_accounts").fetchone()["n"]
+    meaningful = accounts or any(str(row[key] or "").strip() for key in ("name", "email", "phone", "address", "tax_id", "registration_number", "logo"))
+    if not meaningful:
+        return
+    meta = connection.execute("SELECT value FROM meta WHERE key = 'legacyBusinessId'").fetchone()
+    business_id = meta["value"] if meta else str(uuid.uuid4())
+    connection.execute(
+        """
+        INSERT INTO meta (key, value) VALUES ('legacyBusinessId', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (business_id,),
+    )
+    next_row = connection.execute("SELECT value FROM meta WHERE key = 'nextNumber'").fetchone()
+    try:
+        next_number = int(next_row["value"]) if next_row else 1
+    except (TypeError, ValueError):
+        next_number = 1
+    connection.execute(
+        """
+        INSERT INTO businesses (
+          id, name, email, phone, address, tax_id, registration_number, logo, currency, extra_currencies,
+          tax_rate, invoice_template, number_length, date_format, next_number, position
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        """,
+        (
+            business_id,
+            row["name"],
+            row["email"],
+            row["phone"],
+            row["address"],
+            row["tax_id"],
+            row["registration_number"],
+            row["logo"],
+            row["currency"],
+            row["extra_currencies"],
+            row["tax_rate"],
+            row["invoice_template"],
+            row["number_length"],
+            row["date_format"],
+            next_number,
+        ),
+    )
+    connection.execute(
+        "UPDATE bank_accounts SET business_id = ? WHERE TRIM(COALESCE(business_id, '')) = ''",
+        (business_id,),
+    )
+    connection.execute(
+        "UPDATE invoices SET business_id = ? WHERE TRIM(COALESCE(business_id, '')) = ''",
+        (business_id,),
+    )
+
+
 def init():
     connection = connect()
     try:
@@ -202,6 +282,7 @@ def init():
         ensure_columns(connection)
         ensure_item_shape(connection)
         fold_vat_into_tax_id(connection)
+        migrate_businesses(connection)
         connection.commit()
     finally:
         connection.close()
@@ -225,6 +306,7 @@ def empty_desk():
             "dateFormat": "iso",
             "accounts": [],
         },
+        "businesses": [],
         "clients": [],
         "invoices": [],
         "nextNumber": 1,
@@ -313,39 +395,47 @@ def _identity(value):
     return text or str(uuid.uuid4())
 
 
+def _business_out(row, accounts):
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "email": row["email"],
+        "phone": row["phone"],
+        "address": row["address"],
+        "taxId": row["tax_id"],
+        "registrationNumber": row["registration_number"],
+        "logo": _logo(row["logo"]),
+        "currency": _currency(row["currency"]),
+        "extraCurrencies": _currencies(row["extra_currencies"]),
+        "taxRate": row["tax_rate"],
+        "invoiceTemplate": _template(row["invoice_template"]),
+        "numberLength": _number_length(row["number_length"]),
+        "dateFormat": _date_format(row["date_format"]),
+        "nextNumber": row["next_number"] if row["next_number"] else 1,
+        "accounts": accounts,
+    }
+
+
+def _account_out(row):
+    return {"id": row["id"], "bank": row["bank"], "account": row["account"], "bic": row["bic"]}
+
+
 def load_desk():
     init()
     connection = connect()
     try:
-        business_row = connection.execute("SELECT * FROM business WHERE id = 1").fetchone()
-        if business_row is None:
-            business = empty_desk()["business"]
-        else:
-            business = {
-                "name": business_row["name"],
-                "email": business_row["email"],
-                "phone": business_row["phone"],
-                "address": business_row["address"],
-                "taxId": business_row["tax_id"],
-                "registrationNumber": business_row["registration_number"],
-                "logo": _logo(business_row["logo"]),
-                "currency": _currency(business_row["currency"]),
-                "extraCurrencies": _currencies(business_row["extra_currencies"]),
-                "taxRate": business_row["tax_rate"],
-                "invoiceTemplate": _template(business_row["invoice_template"]),
-                "numberLength": _number_length(business_row["number_length"]),
-                "dateFormat": _date_format(business_row["date_format"]),
-            }
-        accounts = [
-            {
-                "id": row["id"],
-                "bank": row["bank"],
-                "account": row["account"],
-                "bic": row["bic"],
-            }
-            for row in connection.execute("SELECT * FROM bank_accounts ORDER BY position")
+        account_rows = connection.execute("SELECT * FROM bank_accounts ORDER BY position").fetchall()
+        business_rows = connection.execute("SELECT * FROM businesses ORDER BY position, name").fetchall()
+        businesses = [
+            _business_out(
+                row,
+                [_account_out(account) for account in account_rows if account["business_id"] == row["id"]],
+            )
+            for row in business_rows
         ]
-        business["accounts"] = accounts
+        if businesses and any(not account["business_id"] for account in account_rows):
+            businesses[0]["accounts"].extend(_account_out(account) for account in account_rows if not account["business_id"])
+        business = businesses[0] if businesses else empty_desk()["business"]
         clients = [
             {
                 "id": row["id"],
@@ -387,6 +477,7 @@ def load_desk():
                     "taxRate": invoice["tax_rate"],
                     "issued": bool(invoice["issued"]),
                     "dateFormat": _date_format(invoice["date_format"]),
+                    "businessId": invoice["business_id"],
                     "items": items,
                 }
             )
@@ -395,8 +486,11 @@ def load_desk():
             next_number = int(next_row["value"]) if next_row else 1
         except (TypeError, ValueError):
             next_number = 1
+        if businesses:
+            next_number = businesses[0].get("nextNumber") or next_number
         return {
             "business": business,
+            "businesses": businesses,
             "clients": clients,
             "invoices": invoices,
             "nextNumber": next_number,
@@ -422,6 +516,7 @@ def save_desk(desk):
         connection.execute("DELETE FROM invoices")
         connection.execute("DELETE FROM clients")
         connection.execute("DELETE FROM bank_accounts")
+        connection.execute("DELETE FROM businesses")
         connection.execute(
             """
             INSERT INTO business (
@@ -459,23 +554,90 @@ def save_desk(desk):
                 _date_format(business.get("dateFormat")),
             ),
         )
-        accounts = business.get("accounts") if isinstance(business.get("accounts"), list) else []
-        for position, account in enumerate(accounts):
-            if not isinstance(account, dict):
+        businesses = desk.get("businesses") if isinstance(desk.get("businesses"), list) else [business]
+        stored = []
+        for position, item in enumerate(businesses):
+            if not isinstance(item, dict):
                 continue
+            if not any(str(item.get(key) or "").strip() for key in ("name", "email", "phone", "address", "taxId", "registrationNumber", "logo")) and not (
+                isinstance(item.get("accounts"), list)
+                and any(str(account.get(key) or "").strip() for account in item["accounts"] if isinstance(account, dict) for key in ("bank", "account", "bic"))
+            ):
+                continue
+            business_id = _identity(item.get("id"))
+            stored.append(item)
+            try:
+                item_next = int(item.get("nextNumber") or 1)
+            except (TypeError, ValueError):
+                item_next = 1
             connection.execute(
                 """
-                INSERT INTO bank_accounts (id, bank, account, bic, position)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO businesses (
+                  id, name, email, phone, address, tax_id, registration_number, logo, currency, extra_currencies,
+                  tax_rate, invoice_template, number_length, date_format, next_number, position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    _identity(account.get("id")),
-                    _text(account.get("bank")),
-                    _text(account.get("account")),
-                    _text(account.get("bic")),
+                    business_id,
+                    _text(item.get("name")),
+                    _text(item.get("email")),
+                    _text(item.get("phone")),
+                    _text(item.get("address")),
+                    _text(item.get("taxId")),
+                    _text(item.get("registrationNumber")),
+                    _logo(item.get("logo")),
+                    _currency(item.get("currency")),
+                    json.dumps(_currencies(item.get("extraCurrencies"))),
+                    _number(item.get("taxRate")),
+                    _template(item.get("invoiceTemplate")),
+                    _number_length(item.get("numberLength")),
+                    _date_format(item.get("dateFormat")),
+                    item_next,
                     position,
                 ),
             )
+            accounts = item.get("accounts") if isinstance(item.get("accounts"), list) else []
+            for account_position, account in enumerate(accounts):
+                if not isinstance(account, dict):
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO bank_accounts (id, business_id, bank, account, bic, position)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _identity(account.get("id")),
+                        business_id,
+                        _text(account.get("bank")),
+                        _text(account.get("account")),
+                        _text(account.get("bic")),
+                        account_position,
+                    ),
+                )
+        mirror = stored[0] if stored else business
+        connection.execute(
+            """
+            UPDATE business SET
+              name = ?, email = ?, phone = ?, address = ?, tax_id = ?, registration_number = ?, logo = ?,
+              currency = ?, extra_currencies = ?, tax_rate = ?, invoice_template = ?, number_length = ?, date_format = ?
+            WHERE id = 1
+            """,
+            (
+                _text(mirror.get("name")),
+                _text(mirror.get("email")),
+                _text(mirror.get("phone")),
+                _text(mirror.get("address")),
+                _text(mirror.get("taxId")),
+                _text(mirror.get("registrationNumber")),
+                _logo(mirror.get("logo")),
+                _currency(mirror.get("currency")),
+                json.dumps(_currencies(mirror.get("extraCurrencies"))),
+                _number(mirror.get("taxRate")),
+                _template(mirror.get("invoiceTemplate")),
+                _number_length(mirror.get("numberLength")),
+                _date_format(mirror.get("dateFormat")),
+            ),
+        )
         for position, client in enumerate(clients):
             if not isinstance(client, dict):
                 continue
@@ -502,8 +664,8 @@ def save_desk(desk):
             connection.execute(
                 """
                 INSERT INTO invoices (
-                  id, number, client_id, issue_date, due_date, status, notes, tax_rate, issued, date_format, position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  id, number, client_id, issue_date, due_date, status, notes, tax_rate, issued, date_format, business_id, position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     invoice_id,
@@ -516,6 +678,7 @@ def save_desk(desk):
                     _number(invoice.get("taxRate")),
                     1 if invoice.get("issued") or (_text(invoice.get("status")) or "draft") != "draft" else 0,
                     _date_format(invoice.get("dateFormat")),
+                    _text(invoice.get("businessId")),
                     position,
                 ),
             )
@@ -543,7 +706,7 @@ def save_desk(desk):
                     ),
                 )
         try:
-            next_number = int(desk.get("nextNumber") or 1)
+            next_number = int((mirror or {}).get("nextNumber") or desk.get("nextNumber") or 1)
         except (TypeError, ValueError):
             next_number = 1
         connection.execute(

@@ -31,6 +31,7 @@ function emptyDesk() {
       dateFormat: "iso",
       accounts: [],
     },
+    businesses: [],
     clients: [],
     invoices: [],
     nextNumber: 1,
@@ -38,20 +39,8 @@ function emptyDesk() {
 }
 
 function deskIsBlank(desk) {
-  const business = desk.business || {};
-  return (
-    !desk.clients?.length &&
-    !desk.invoices?.length &&
-    !String(business.name || "").trim() &&
-    !String(business.email || "").trim() &&
-    !String(business.address || "").trim() &&
-    !String(business.registrationNumber || "").trim() &&
-    !String(business.taxId || "").trim() &&
-    !logoSrc(business.logo) &&
-    !(business.accounts || []).some((account) =>
-      [account.bank, account.account, account.bic].some((value) => hasMark(value))
-    )
-  );
+  const businesses = Array.isArray(desk.businesses) && desk.businesses.length ? desk.businesses : [desk.business || {}];
+  return !desk.clients?.length && !desk.invoices?.length && !businesses.some((business) => businessHasData(business));
 }
 
 function readBrowserDesk() {
@@ -70,14 +59,45 @@ function adoptTaxId(party) {
   delete party.vatCode;
 }
 
+function normalizeBusiness(raw, fallbackNumber) {
+  const business = {
+    id: raw?.id || uid(),
+    name: raw?.name || "",
+    email: raw?.email || "",
+    phone: raw?.phone || "",
+    address: raw?.address || "",
+    taxId: raw?.taxId || "",
+    registrationNumber: raw?.registrationNumber || "",
+    logo: raw?.logo || "",
+    currency: raw?.currency || "EUR",
+    extraCurrencies: Array.isArray(raw?.extraCurrencies) ? raw.extraCurrencies : [],
+    taxRate: Number(raw?.taxRate) || 0,
+    invoiceTemplate: raw?.invoiceTemplate || "",
+    numberLength: raw?.numberLength || 3,
+    dateFormat: knownDateFormat(raw?.dateFormat),
+    nextNumber: Math.max(1, Math.round(Number(raw?.nextNumber ?? fallbackNumber)) || 1),
+    accounts: Array.isArray(raw?.accounts) ? raw.accounts : [],
+  };
+  adoptTaxId(business);
+  return business;
+}
+
 function prepareDesk(desk) {
   if (!desk) return desk;
+  const fallbackNumber = Number(desk.nextNumber) || 1;
+  if (!Array.isArray(desk.businesses) || !desk.businesses.length) {
+    desk.businesses = businessHasData(desk.business) ? [normalizeBusiness(desk.business, fallbackNumber)] : [];
+  } else {
+    desk.businesses = desk.businesses.map((business) => normalizeBusiness(business, fallbackNumber));
+  }
+  desk.business = desk.businesses[0] || normalizeBusiness(desk.business, fallbackNumber);
+  desk.nextNumber = desk.business.nextNumber || fallbackNumber;
   adoptTaxId(desk.business);
-  if (desk.business) desk.business.dateFormat = knownDateFormat(desk.business.dateFormat);
   (desk.clients || []).forEach(adoptTaxId);
   (desk.invoices || []).forEach((invoice) => {
     invoice.issued = Boolean(invoice.issued) || invoice.status !== "draft";
     invoice.dateFormat = knownDateFormat(invoice.dateFormat);
+    if (!invoice.businessId) invoice.businessId = desk.businesses[0]?.id || "";
     (invoice.items || []).forEach((item) => {
       if (item.tax == null || item.tax === "") item.tax = Number(invoice.taxRate) || 0;
     });
@@ -119,6 +139,7 @@ const ui = {
   clientQuery: "",
   preview: false,
   editingLineId: null,
+  editingBusinessId: null,
 };
 
 const main = document.querySelector("#main");
@@ -128,6 +149,8 @@ document.querySelectorAll("[data-nav]").forEach((button) => {
     ui.view = button.dataset.nav;
     ui.error = "";
     ui.preview = false;
+    ui.editingBusinessId = null;
+    if (Array.isArray(data.businesses)) data.businesses = data.businesses.filter(businessHasData);
     document.body.classList.remove("preview-open");
     render();
   });
@@ -300,30 +323,37 @@ function clearGeneratedPaymentNote(invoice) {
   return true;
 }
 
-function numberLength() {
-  const length = Math.round(Number(data.business.numberLength));
+function numberLength(business = data.business) {
+  const length = Math.round(Number(business?.numberLength));
   if (!Number.isFinite(length)) return 3;
   return Math.min(12, Math.max(1, length));
 }
 
-function nextNumberValue() {
-  const value = Math.round(Number(data.nextNumber));
+function nextNumberValue(business = data.business) {
+  const value = Math.round(Number(business?.nextNumber ?? data.nextNumber));
   if (!Number.isFinite(value) || value < 1) return 1;
   return Math.min(999999999999, value);
 }
 
-function formatInvoiceNumber(index) {
-  const padded = String(index).padStart(numberLength(), "0");
-  const template = String(data.business.invoiceTemplate || "").trim();
+function rememberNextNumber(value, business = data.business) {
+  const next = Math.min(999999999999, Math.max(1, Math.round(Number(value)) || 1));
+  if (business) business.nextNumber = next;
+  if (!business || business === data.business) data.nextNumber = next;
+  return next;
+}
+
+function formatInvoiceNumber(index, business = data.business) {
+  const padded = String(index).padStart(numberLength(business), "0");
+  const template = String(business?.invoiceTemplate || "").trim();
   if (!template) return `INV-${new Date().getFullYear()}-${padded}`;
   if (/\{nr\}/i.test(template)) return template.replace(/\{nr\}/gi, padded);
   return `${template}${padded}`;
 }
 
-function indexFromNumber(number) {
+function indexFromNumber(number, business = data.business) {
   const text = String(number || "").trim();
   if (!text) return null;
-  const template = String(data.business.invoiceTemplate || "").trim();
+  const template = String(business?.invoiceTemplate || "").trim();
   const pattern = template
     ? new RegExp(
         `^${(/\{nr\}/i.test(template) ? template : `${template}{nr}`)
@@ -347,7 +377,7 @@ function confirmNextNumber(index) {
     `Set the next invoice number to ${formatInvoiceNumber(following)}? It is currently ${formatInvoiceNumber(nextNumberValue())}.`
   );
   if (!approved) return false;
-  data.nextNumber = following;
+  rememberNextNumber(following);
   return true;
 }
 
@@ -368,16 +398,20 @@ function paintNumberPreview() {
 }
 
 function createInvoice() {
-  data.nextNumber = nextNumberValue();
+  const supplier = data.businesses.find(businessHasData);
+  if (supplier) data.business = supplier;
+  rememberNextNumber(nextNumberValue());
   const number = formatInvoiceNumber(data.nextNumber);
   if (invoiceNumberTaken(number)) {
     ui.view = "business";
+    ui.editingBusinessId = supplier?.id || null;
     render();
     return null;
   }
   const invoice = {
     id: uid(),
     number,
+    businessId: supplier?.id || "",
     clientId: data.clients[0]?.id || "",
     issueDate: today(),
     dueDate: plusDays(14),
@@ -388,7 +422,7 @@ function createInvoice() {
     taxRate: Number(data.business.taxRate) || 0,
     items: [blankItem()],
   };
-  data.nextNumber += 1;
+  rememberNextNumber(data.nextNumber + 1);
   data.invoices.unshift(invoice);
   save();
   return invoice.id;
@@ -400,6 +434,25 @@ function currentInvoice() {
 
 function clientById(id) {
   return data.clients.find((client) => client.id === id) || null;
+}
+
+function businessById(id) {
+  return data.businesses.find((business) => business.id === id) || null;
+}
+
+function businessFor(invoice) {
+  return businessById(invoice?.businessId) || data.businesses.find(businessHasData) || data.business;
+}
+
+function businessHasData(business) {
+  if (!business) return false;
+  if (["name", "email", "phone", "address", "registrationNumber", "taxId"].some((key) => hasMark(business[key]))) return true;
+  if (logoSrc(business.logo)) return true;
+  return (business.accounts || []).some((account) => [account.bank, account.account, account.bic].some((value) => hasMark(value)));
+}
+
+function blankBusiness() {
+  return normalizeBusiness({ nextNumber: 1 }, 1);
 }
 
 function knownCurrency(code) {
@@ -714,6 +767,9 @@ function renderEditor() {
     return;
   }
   if (clearGeneratedPaymentNote(invoice)) save();
+  const supplier = businessFor(invoice);
+  if (supplier?.id && !invoice.businessId) invoice.businessId = supplier.id;
+  if (supplier) data.business = supplier;
   const clientOptions = data.clients
     .map(
       (client) =>
@@ -734,7 +790,18 @@ function renderEditor() {
         </div>
         <div class="stack">
           <div class="editor-identity">
-            <label><span>Supplier</span><input data-field="number" type="text" aria-label="Supplier" value="${esc(invoice.number)}" required /></label>
+            <label><span>Supplier</span>
+              <select data-field="businessId">
+                <option value="">Select a supplier</option>
+                ${data.businesses
+                  .filter(businessHasData)
+                  .map(
+                    (business) =>
+                      `<option value="${business.id}" ${business.id === invoice.businessId ? "selected" : ""}>${esc(business.name || "Business")}</option>`
+                  )
+                  .join("")}
+              </select>
+            </label>
             <label><span>Client</span>
               <select data-field="clientId">
                 <option value="">Select a client</option>
@@ -742,6 +809,7 @@ function renderEditor() {
               </select>
             </label>
           </div>
+          <label class="field-number"><span>Number</span><input data-field="number" type="text" value="${esc(invoice.number)}" required /></label>
           <div class="editor-dates">
             <label><span>Issued</span><span class="date-field"><input data-field="issueDate" type="text" inputmode="numeric" maxlength="10" placeholder="${datePattern(invoice.dateFormat)}" value="${esc(formatDate(invoice.issueDate, invoice.dateFormat))}" autocomplete="off" /><input data-date-for="issueDate" type="date" value="${esc(invoice.issueDate)}" aria-label="Choose issue date" /></span></label>
             <label><span>Due</span><span class="date-field"><input data-field="dueDate" type="text" inputmode="numeric" maxlength="10" placeholder="${datePattern(invoice.dateFormat)}" value="${esc(formatDate(invoice.dueDate, invoice.dateFormat))}" autocomplete="off" /><input data-date-for="dueDate" type="date" value="${esc(invoice.dueDate)}" aria-label="Choose due date" /></span></label>
@@ -864,10 +932,11 @@ function renderEditor() {
   });
   main.querySelector("#delete")?.addEventListener("click", () => {
     if (!confirm(`Delete ${invoice.number}?`)) return;
-    const index = indexFromNumber(invoice.number);
-    const reusable = !invoice.issued && index != null && index + 1 === nextNumberValue();
+    const supplier = businessFor(invoice);
+    const index = indexFromNumber(invoice.number, supplier);
+    const reusable = !invoice.issued && index != null && index + 1 === nextNumberValue(supplier);
     data.invoices = data.invoices.filter((item) => item.id !== invoice.id);
-    if (reusable) data.nextNumber = index;
+    if (reusable) rememberNextNumber(index, supplier);
     save();
     ui.view = "invoices";
     render();
@@ -1031,6 +1100,10 @@ function onInvoiceInput(event) {
       const picker = main.querySelector(`[data-date-for="${target.dataset.field}"]`);
       if (picker) picker.value = parsed;
     } else invoice[target.dataset.field] = target.type === "number" ? Number(target.value) : target.dataset.field === "number" ? target.value.trim() : target.value;
+    if (target.dataset.field === "businessId") {
+      const selected = businessById(invoice.businessId);
+      if (selected) data.business = selected;
+    }
   }
   if (target.dataset.itemField) {
     const item = invoice.items.find((entry) => entry.id === target.dataset.itemId);
@@ -1054,7 +1127,7 @@ function onInvoiceInput(event) {
 
 function invoiceProblems(invoice) {
   const problems = [];
-  if (!data.business.name.trim()) problems.push("Add your business name first.");
+  if (!String(businessFor(invoice).name || "").trim()) problems.push("Add your business name first.");
   if (!invoice.clientId) problems.push("Choose a client.");
   if (!invoiceLines(invoice).length) problems.push("Add a line with a description and a unit price.");
   if (invoiceNumberTaken(invoice.number, invoice.id)) problems.push("An invoice with this number already exists.");
@@ -1113,7 +1186,7 @@ function paintSheet({ animate = false } = {}) {
   const wrap = main.querySelector("#sheet-page");
   if (!invoice || !wrap) return;
   const client = clientById(invoice.clientId);
-  const business = data.business;
+  const business = businessFor(invoice);
   const sums = totals(invoice);
   const stamp =
     invoice.status === "paid"
@@ -1397,13 +1470,63 @@ function paintClients() {
   });
 }
 
+function businessSummary(business) {
+  const detail = [
+    business.address,
+    business.email,
+    business.phone,
+    hasMark(business.registrationNumber) ? `Reg. no. ${business.registrationNumber}` : "",
+    hasMark(business.taxId) ? `Tax ID ${business.taxId}` : "",
+  ]
+    .map((line) => String(line || "").trim())
+    .filter(Boolean)
+    .join("\n");
+  return { title: business.name || "Business", detail };
+}
+
+function prepareBusinessView() {
+  if (!Array.isArray(data.businesses)) data.businesses = [];
+  data.businesses = data.businesses.filter((business) => businessHasData(business) || business.id === ui.editingBusinessId);
+  if (!data.businesses.some(businessHasData)) {
+    let editing = data.businesses.find((business) => business.id === ui.editingBusinessId);
+    if (!editing) {
+      editing = blankBusiness();
+      data.businesses = [editing];
+      ui.editingBusinessId = editing.id;
+    }
+  }
+  const editing = data.businesses.find((business) => business.id === ui.editingBusinessId);
+  data.business = editing || data.businesses.find(businessHasData) || data.business;
+  if (data.business && data.business.nextNumber == null) data.business.nextNumber = data.nextNumber || 1;
+}
+
 function renderBusiness() {
+  prepareBusinessView();
   const business = data.business;
+  const rows = data.businesses
+    .map((item) => {
+      if (item.id === ui.editingBusinessId) return `<div class="business-form" id="business-slot"></div>`;
+      if (!businessHasData(item)) return "";
+      const summary = businessSummary(item);
+      return `<article class="business-row">
+        <div>
+          <h3>${esc(summary.title)}</h3>
+          ${summary.detail ? `<p>${esc(summary.detail)}</p>` : ""}
+        </div>
+        <span class="line-summary-actions">
+          <button type="button" class="btn" data-edit-business="${item.id}">Edit</button>
+          <button type="button" class="btn btn-danger" data-remove-business="${item.id}">Remove</button>
+        </span>
+      </article>`;
+    })
+    .join("");
   main.innerHTML = `
     <div class="panel">
       <h2>Business</h2>
-      <p class="lede">This appears at the top of every invoice.</p>
-      <form id="business-form" class="stack" style="margin-top:18px">
+      <p class="lede">Each business can issue its own invoices.</p>
+      <div class="business-list" id="business-list">${rows}</div>
+      <button type="button" class="btn btn-quiet" id="add-business" ${data.businesses.some(businessHasData) ? "" : "hidden"}>Add business</button>
+      <form id="business-form" class="stack" hidden>
         <div>
           <span class="field-label">Logo</span>
           <div class="logo-picker">
@@ -1472,6 +1595,11 @@ function renderBusiness() {
           <div class="accounts" id="accounts"></div>
           <button type="button" class="btn btn-quiet" id="add-account">Add account</button>
         </div>
+        ${
+          businessHasData(business) || data.businesses.some((item) => item.id !== business.id && businessHasData(item))
+            ? `<div class="line-summary-actions"><button type="button" class="btn btn-danger" id="remove-open-business">Remove</button></div>`
+            : ""
+        }
       </form>
       <div class="actions">
         <button type="button" class="btn" id="export">Export backup</button>
@@ -1479,10 +1607,16 @@ function renderBusiness() {
       </div>
     </div>
   `;
+  const slot = main.querySelector("#business-slot");
+  const form = main.querySelector("#business-form");
+  if (slot && form) {
+    form.hidden = false;
+    slot.append(form);
+  }
   if (!Array.isArray(data.business.accounts)) data.business.accounts = [];
   if (!Array.isArray(data.business.extraCurrencies)) data.business.extraCurrencies = [];
-  main.querySelector("#business-form").addEventListener("submit", (event) => event.preventDefault());
-  main.querySelector("#business-form").addEventListener("input", (event) => {
+  form.addEventListener("submit", (event) => event.preventDefault());
+  form.addEventListener("input", (event) => {
     const field = event.target.dataset.business;
     const accountField = event.target.dataset.accountField;
     if (accountField) {
@@ -1498,6 +1632,8 @@ function renderBusiness() {
       const length = Math.round(Number(event.target.value));
       if (Number.isFinite(length) && length >= 1) data.business.numberLength = Math.min(12, length);
     } else data.business[field] = event.target.value;
+    const add = main.querySelector("#add-business");
+    if (add) add.hidden = !data.businesses.some(businessHasData);
     save();
     paintNumberPreview();
   });
@@ -1509,13 +1645,13 @@ function renderBusiness() {
   nextNumberInput.addEventListener("input", () => {
     const value = Math.round(Number(nextNumberInput.value));
     if (!Number.isFinite(value) || value < 1) return;
-    data.nextNumber = Math.min(999999999999, value);
+    rememberNextNumber(value, data.business);
     save();
     paintNumberPreview();
   });
   nextNumberInput.addEventListener("blur", () => {
-    data.nextNumber = nextNumberValue();
-    nextNumberInput.value = String(data.nextNumber);
+    rememberNextNumber(nextNumberValue(data.business), data.business);
+    nextNumberInput.value = String(data.business.nextNumber);
     save();
     paintNumberPreview();
   });
@@ -1556,6 +1692,49 @@ function renderBusiness() {
   paintAccounts();
   paintNumberPreview();
   enhanceSelects(main);
+  main.querySelector("#remove-open-business")?.addEventListener("click", () => {
+    data.businesses = data.businesses.filter((item) => item.id !== ui.editingBusinessId);
+    data.invoices.forEach((invoice) => {
+      if (invoice.businessId === ui.editingBusinessId) invoice.businessId = "";
+    });
+    ui.editingBusinessId = null;
+    save();
+    render();
+  });
+  main.querySelector("#add-business").addEventListener("click", () => {
+    const current = businessById(ui.editingBusinessId);
+    if (current && !businessHasData(current)) {
+      main.querySelector('[data-business="name"]')?.focus();
+      return;
+    }
+    const created = blankBusiness();
+    data.businesses.push(created);
+    ui.editingBusinessId = created.id;
+    render();
+    main.querySelector('[data-business="name"]')?.focus();
+  });
+  main.querySelectorAll("[data-edit-business]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const current = businessById(ui.editingBusinessId);
+      if (current && !businessHasData(current)) data.businesses = data.businesses.filter((item) => item.id !== current.id);
+      ui.editingBusinessId = button.dataset.editBusiness;
+      render();
+      main.querySelector('[data-business="name"]')?.focus();
+    });
+  });
+  main.querySelectorAll("[data-remove-business]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.removeBusiness;
+      data.businesses = data.businesses.filter((item) => item.id !== id);
+      data.invoices.forEach((invoice) => {
+        if (invoice.businessId === id) invoice.businessId = data.businesses.find(businessHasData)?.id || "";
+      });
+      if (ui.editingBusinessId === id) ui.editingBusinessId = null;
+      if (!data.businesses.some(businessHasData)) ui.editingBusinessId = null;
+      save();
+      render();
+    });
+  });
   main.querySelector("#export").addEventListener("click", exportBackup);
   main.querySelector("#import").addEventListener("change", importBackup);
 }
@@ -1730,17 +1909,24 @@ function importBackup(event) {
   reader.onload = () => {
     try {
       const next = JSON.parse(String(reader.result));
-      if (!next || !Array.isArray(next.invoices) || !Array.isArray(next.clients) || !next.business) {
+      if (!next || !Array.isArray(next.invoices) || !Array.isArray(next.clients) || (!next.business && !Array.isArray(next.businesses))) {
         throw new Error("Unrecognized backup");
       }
       if (!confirm("Replace the invoices on this computer with the backup?")) return;
-      adoptTaxId(next.business);
-      (next.clients || []).forEach(adoptTaxId);
-      Object.assign(data, {
-        business: { ...data.business, ...next.business },
+      const merged = prepareDesk({
+        business: next.business || {},
+        businesses: next.businesses,
         clients: next.clients,
         invoices: next.invoices,
-        nextNumber: Number(next.nextNumber) || data.nextNumber,
+        nextNumber: next.nextNumber,
+      });
+      ui.editingBusinessId = null;
+      Object.assign(data, {
+        business: merged.business,
+        businesses: merged.businesses,
+        clients: merged.clients,
+        invoices: merged.invoices,
+        nextNumber: merged.nextNumber,
       });
       save();
       render();

@@ -347,6 +347,10 @@ tr.invoice-row:hover td {
   gap: 14px;
 }
 
+#business-form[hidden] {
+  display: none;
+}
+
 label span,
 .field-label {
   display: block;
@@ -563,6 +567,46 @@ input[type="number"]::-webkit-outer-spin-button {
   background: var(--ink);
   color: var(--sheet);
   border-color: var(--ink);
+}
+
+.field-number {
+  max-width: 360px;
+}
+
+.business-list {
+  display: grid;
+  margin-top: 18px;
+}
+
+.business-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ink);
+}
+
+.business-row h3 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 560;
+}
+
+.business-row p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  white-space: pre-line;
+  font-size: 13px;
+}
+
+.business-form {
+  padding: 16px 0 8px;
+}
+
+#add-business {
+  margin-top: 12px;
 }
 
 .editor-identity {
