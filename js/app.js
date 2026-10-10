@@ -943,7 +943,7 @@ function renderEditor() {
         <div class="actions">
           ${statusActions(invoice)}
           <button type="button" class="btn" id="print">Print</button>
-          ${invoice.status === "draft" && !invoiceIsPending(invoice) ? `<button type="button" class="btn btn-danger" id="delete">Delete</button>` : ""}
+          ${invoice.status === "draft" && !invoice.issued && !invoiceIsPending(invoice) ? `<button type="button" class="btn btn-danger" id="delete">Delete</button>` : ""}
         </div>
       </form>
       <div class="sheet-wrap" id="sheet-wrap" ${ui.preview ? "" : "hidden"}>
@@ -1059,6 +1059,7 @@ function renderEditor() {
       render();
       return;
     }
+    if (invoice.status !== "draft" || invoice.issued) return;
     const supplier = businessFor(invoice) || data.business;
     const index = indexFromNumber(invoice.number, supplier);
     const reusable = !invoice.issued && index != null && index + 1 === nextNumberValue(supplier);
@@ -1078,10 +1079,7 @@ function renderEditor() {
 function statusActions(invoice) {
   if (invoiceIsPending(invoice)) return `<button type="button" class="btn btn-primary" id="create-draft">Create</button>`;
   if (invoice.status === "draft") return `<button type="button" class="btn btn-primary" data-status="sent">Mark sent</button>`;
-  if (invoice.status === "sent") {
-    return `<button type="button" class="btn btn-primary" data-status="paid">Mark paid</button>
-      <button type="button" class="btn" data-status="draft">Back to draft</button>`;
-  }
+  if (invoice.status === "sent") return `<button type="button" class="btn btn-primary" data-status="paid">Mark paid</button>`;
   return `<button type="button" class="btn" data-status="sent">Mark unpaid</button>`;
 }
 
@@ -1337,7 +1335,7 @@ function invoiceProblems(invoice) {
 
 function setStatus(status) {
   const invoice = currentInvoice();
-  if (!invoice) return;
+  if (!invoice || status === "draft" || invoiceIsPending(invoice)) return;
   if (status === "sent") {
     const problems = invoiceProblems(invoice);
     if (problems.length) {
