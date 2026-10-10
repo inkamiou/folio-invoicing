@@ -144,6 +144,9 @@ const ui = {
   lineSnapshot: null,
   draftLineIds: new Set(),
   lastBusinessId: "",
+  pendingInvoice: null,
+  pendingSnapshot: "",
+  pendingNumber: "",
 };
 
 ui.lastBusinessId =
@@ -154,8 +157,7 @@ const main = document.querySelector("#main");
 
 document.querySelectorAll("[data-nav]").forEach((button) => {
   button.addEventListener("click", () => {
-    const open = currentInvoice();
-    if (finishOpenLine(open) || (open && releaseEmptyLine(open))) save();
+    if (!releaseEditor()) return;
     ui.view = button.dataset.nav;
     ui.error = "";
     ui.preview = false;
@@ -401,10 +403,30 @@ function invoiceNumberTaken(number, exceptId) {
   );
 }
 
+function invoicesInSeries(business) {
+  const id = business?.id || "";
+  return data.invoices.filter((invoice) => (invoice.businessId || "") === id);
+}
+
+function highestSavedIndex(business) {
+  let highest = 0;
+  for (const invoice of invoicesInSeries(business)) {
+    const index = indexFromNumber(invoice.number, business);
+    if (index != null && index > highest) highest = index;
+  }
+  return highest;
+}
+
+function nextInvoiceIndex(business = data.business) {
+  let index = Math.max(nextNumberValue(business), highestSavedIndex(business) + 1);
+  for (let step = 0; step < 10000 && invoiceNumberTaken(formatInvoiceNumber(index, business)); step += 1) index += 1;
+  return index;
+}
+
 function paintNumberPreview() {
   const preview = main.querySelector("#number-preview");
   const error = main.querySelector("#number-error");
-  const number = formatInvoiceNumber(nextNumberValue());
+  const number = formatInvoiceNumber(nextInvoiceIndex());
   if (preview) preview.textContent = `Use {nr} where the number goes. Next invoice: ${number}`;
   if (error) error.textContent = invoiceNumberTaken(number) ? "An invoice with this number already exists." : "";
 }
@@ -416,11 +438,15 @@ function lastPickedBusinessId() {
 }
 
 function createInvoice() {
-  const businessId = lastPickedBusinessId();
-  const supplier = businessById(businessId) || data.businesses.find(businessHasData) || data.business;
+  const open = currentInvoice();
+  if (invoiceIsPending(open)) {
+    if (!discardPendingInvoice()) return null;
+  } else if (open && ui.view === "editor" && (finishOpenLine(open) || releaseEmptyLine(open))) save();
+  const pickedId = lastPickedBusinessId();
+  const supplier = businessById(pickedId) || data.businesses.find(businessHasData) || data.business;
   if (supplier) data.business = supplier;
-  rememberNextNumber(nextNumberValue(supplier), supplier);
-  const number = formatInvoiceNumber(nextNumberValue(supplier), supplier);
+  const businessId = supplier?.id || "";
+  const number = formatInvoiceNumber(nextInvoiceIndex(supplier), supplier);
   if (invoiceNumberTaken(number)) {
     ui.view = "business";
     ui.editingBusinessId = supplier?.id || null;
@@ -443,14 +469,79 @@ function createInvoice() {
     taxRate: Number(data.business.taxRate) || 0,
     items: [blankItem()],
   };
-  rememberNextNumber(data.nextNumber + 1);
-  data.invoices.unshift(invoice);
-  save();
+  ui.pendingInvoice = invoice;
+  ui.pendingNumber = number;
+  ui.pendingSnapshot = JSON.stringify(invoice);
+  if (businessId) ui.lastBusinessId = businessId;
   return invoice.id;
 }
 
 function currentInvoice() {
+  if (ui.pendingInvoice && ui.pendingInvoice.id === ui.invoiceId) return ui.pendingInvoice;
   return data.invoices.find((invoice) => invoice.id === ui.invoiceId) || null;
+}
+
+function invoiceIsPending(invoice = currentInvoice()) {
+  return Boolean(invoice && ui.pendingInvoice && invoice.id === ui.pendingInvoice.id);
+}
+
+function dropPendingInvoice() {
+  if (ui.pendingInvoice && ui.invoiceId === ui.pendingInvoice.id) ui.invoiceId = null;
+  ui.pendingInvoice = null;
+  ui.pendingSnapshot = "";
+  ui.pendingNumber = "";
+}
+
+function discardPendingInvoice() {
+  const invoice = ui.pendingInvoice;
+  if (!invoice) return true;
+  if (ui.invoiceId === invoice.id && JSON.stringify(invoice) !== ui.pendingSnapshot) {
+    if (!confirm(`Discard ${invoice.number}? It has not been created.`)) return false;
+  }
+  dropPendingInvoice();
+  return true;
+}
+
+function releaseEditor() {
+  const open = currentInvoice();
+  if (invoiceIsPending(open)) return discardPendingInvoice();
+  if (finishOpenLine(open) || (open && releaseEmptyLine(open))) save();
+  return true;
+}
+
+function reserveCommittedNumber(invoice) {
+  const supplier = businessFor(invoice) || data.business;
+  if (supplier) data.business = supplier;
+  const index = indexFromNumber(invoice.number, supplier);
+  const following = Math.max(highestSavedIndex(supplier) + 1, index == null ? 0 : index + 1);
+  if (following > nextNumberValue(supplier)) rememberNextNumber(following, supplier);
+}
+
+function commitDraft() {
+  const invoice = currentInvoice();
+  if (!invoiceIsPending(invoice)) return;
+  const number = String(invoice.number || "").trim();
+  invoice.number = number;
+  if (!number) {
+    ui.error = "Enter an invoice number.";
+    const error = main.querySelector("#form-error");
+    if (error) error.textContent = ui.error;
+    return;
+  }
+  if (invoiceNumberTaken(number, invoice.id)) {
+    ui.error = "An invoice with this number already exists.";
+    const error = main.querySelector("#form-error");
+    if (error) error.textContent = ui.error;
+    return;
+  }
+  data.invoices.unshift(invoice);
+  ui.pendingInvoice = null;
+  ui.pendingSnapshot = "";
+  ui.pendingNumber = "";
+  reserveCommittedNumber(invoice);
+  ui.error = "";
+  save();
+  render();
 }
 
 function clientById(id) {
@@ -807,7 +898,7 @@ function renderEditor() {
       <form class="editor-form" id="invoice-form">
         <button type="button" class="back" id="back">← Invoices</button>
         <div class="editor-head">
-          <h2>Edit</h2>
+          <h2>${invoiceIsPending(invoice) ? "New invoice" : "Edit"}</h2>
           <div class="editor-tools">
             <button type="button" class="btn" id="draft-preview" aria-pressed="${ui.preview}">Draft Preview</button>
             <span class="status status-${statusLabel(invoice)}">${statusLabel(invoice)}</span>
@@ -876,7 +967,7 @@ function renderEditor() {
     } else button.focus();
   };
   main.querySelector("#back").addEventListener("click", () => {
-    if (finishOpenLine(invoice) || releaseEmptyLine(invoice)) save();
+    if (!releaseEditor()) return;
     ui.view = "invoices";
     ui.preview = false;
     document.body.classList.remove("preview-open");
@@ -957,6 +1048,14 @@ function renderEditor() {
   });
   main.querySelector("#delete")?.addEventListener("click", () => {
     if (!confirm(`Delete ${invoice.number}?`)) return;
+    if (invoiceIsPending(invoice)) {
+      dropPendingInvoice();
+      ui.view = "invoices";
+      ui.preview = false;
+      document.body.classList.remove("preview-open");
+      render();
+      return;
+    }
     const supplier = businessFor(invoice) || data.business;
     const index = indexFromNumber(invoice.number, supplier);
     const reusable = !invoice.issued && index != null && index + 1 === nextNumberValue(supplier);
@@ -966,6 +1065,7 @@ function renderEditor() {
     ui.view = "invoices";
     render();
   });
+  main.querySelector("#create-draft")?.addEventListener("click", () => commitDraft());
   main.querySelectorAll("[data-status]").forEach((button) => {
     button.addEventListener("click", () => setStatus(button.dataset.status));
   });
@@ -973,6 +1073,7 @@ function renderEditor() {
 }
 
 function statusActions(invoice) {
+  if (invoiceIsPending(invoice)) return `<button type="button" class="btn btn-primary" id="create-draft">Create</button>`;
   if (invoice.status === "draft") return `<button type="button" class="btn btn-primary" data-status="sent">Mark sent</button>`;
   if (invoice.status === "sent") {
     return `<button type="button" class="btn btn-primary" data-status="paid">Mark paid</button>
@@ -1189,6 +1290,15 @@ function onInvoiceInput(event) {
       if (selected) {
         data.business = selected;
         ui.lastBusinessId = selected.id;
+        if (invoiceIsPending(invoice) && invoice.number === ui.pendingNumber) {
+          invoice.number = formatInvoiceNumber(nextInvoiceIndex(selected), selected);
+          ui.pendingNumber = invoice.number;
+          const input = main.querySelector('[data-field="number"]');
+          if (input) {
+            input.value = invoice.number;
+            input.dataset.settled = invoice.number;
+          }
+        }
       }
     }
   }
@@ -2056,6 +2166,7 @@ function importBackup(event) {
       ui.editingBusinessId = null;
       ui.creatingBusiness = false;
       ui.businessSnapshot = null;
+      dropPendingInvoice();
       ui.lastBusinessId =
         merged.invoices.find((invoice) => merged.businesses.some((business) => business.id && business.id === invoice.businessId))
           ?.businessId || "";
