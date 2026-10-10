@@ -540,6 +540,9 @@ function commitDraft() {
   ui.pendingNumber = "";
   reserveCommittedNumber(invoice);
   ui.error = "";
+  ui.preview = false;
+  ui.view = "invoices";
+  document.body.classList.remove("preview-open");
   save();
   render();
 }
@@ -940,7 +943,7 @@ function renderEditor() {
         <div class="actions">
           ${statusActions(invoice)}
           <button type="button" class="btn" id="print">Print</button>
-          ${invoice.status === "draft" ? `<button type="button" class="btn btn-danger" id="delete">Delete</button>` : ""}
+          ${invoice.status === "draft" && !invoiceIsPending(invoice) ? `<button type="button" class="btn btn-danger" id="delete">Delete</button>` : ""}
         </div>
       </form>
       <div class="sheet-wrap" id="sheet-wrap" ${ui.preview ? "" : "hidden"}>
