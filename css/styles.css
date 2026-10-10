@@ -315,6 +315,20 @@ tr.invoice-row:hover td {
   color: #f4efe6;
 }
 
+.status-cancelled {
+  background: #e4e0d8;
+  color: var(--muted);
+}
+
+tr.invoice-cancelled {
+  color: var(--muted);
+}
+
+tr.invoice-cancelled .num,
+tr.invoice-cancelled .row-open {
+  text-decoration: line-through;
+}
+
 .empty {
   padding: 54px 28px;
   text-align: left;
@@ -1123,6 +1137,18 @@ body.preview-open {
 
 .stamp-draft {
   color: var(--muted);
+}
+
+.stamp-cancelled {
+  color: var(--muted);
+  width: 148px;
+  height: 148px;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+
+.totals .voided span:last-child {
+  text-decoration: line-through;
 }
 
 .file-row {

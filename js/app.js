@@ -734,7 +734,7 @@ function renderInvoices() {
       <input id="search" class="search" type="search" placeholder="Search number or client" value="${esc(ui.query)}" />
     </div>
     <div class="filters" role="group" aria-label="Filter invoices">
-      ${["all", "draft", "sent", "paid", "overdue"]
+      ${["all", "draft", "sent", "paid", "overdue", "cancelled"]
         .map(
           (filter) =>
             `<button type="button" class="chip" data-filter="${filter}" aria-pressed="${ui.filter === filter}">${filter}</button>`
@@ -835,14 +835,15 @@ function paintInvoiceRows() {
     .map((invoice) => {
       const client = clientById(invoice.clientId);
       const status = statusLabel(invoice);
+      const voided = invoice.status === "cancelled";
       return `
-        <tr class="invoice-row" data-open="${invoice.id}">
+        <tr class="invoice-row${voided ? " invoice-cancelled" : ""}" data-open="${invoice.id}">
           <td class="num"><button type="button" class="row-open" data-open="${invoice.id}">${esc(invoice.number)}</button></td>
           <td>${esc(client?.name || "No client")}</td>
           <td>${esc(formatDate(invoice.issueDate, invoice.dateFormat))}</td>
           <td>${esc(formatDate(invoice.dueDate, invoice.dateFormat))}</td>
           <td><span class="status status-${status}">${status}</span></td>
-          <td class="amount">${money(totals(invoice).total)}</td>
+          <td class="amount">${money(voided ? 0 : totals(invoice).total)}</td>
         </tr>
       `;
     })
@@ -1079,8 +1080,12 @@ function renderEditor() {
 function statusActions(invoice) {
   if (invoiceIsPending(invoice)) return `<button type="button" class="btn btn-primary" id="create-draft">Create</button>`;
   if (invoice.status === "draft") return `<button type="button" class="btn btn-primary" data-status="sent">Mark sent</button>`;
-  if (invoice.status === "sent") return `<button type="button" class="btn btn-primary" data-status="paid">Mark paid</button>`;
-  return `<button type="button" class="btn" data-status="sent">Mark unpaid</button>`;
+  if (invoice.status === "sent") {
+    return `<button type="button" class="btn btn-primary" data-status="paid">Mark paid</button>
+      <button type="button" class="btn" data-status="cancelled">Mark cancelled</button>`;
+  }
+  if (invoice.status === "paid") return `<button type="button" class="btn" data-status="sent">Mark unpaid</button>`;
+  return "";
 }
 
 function releaseEmptyLine(invoice) {
@@ -1335,7 +1340,16 @@ function invoiceProblems(invoice) {
 
 function setStatus(status) {
   const invoice = currentInvoice();
-  if (!invoice || status === "draft" || invoiceIsPending(invoice)) return;
+  if (!invoice || status === "draft" || invoiceIsPending(invoice) || invoice.status === "cancelled") return;
+  if (status === "cancelled") {
+    if (invoice.status !== "sent") return;
+    if (!confirm(`Cancel ${invoice.number}? It stays on record and is no longer payable.`)) return;
+    invoice.status = "cancelled";
+    ui.error = "";
+    save();
+    render();
+    return;
+  }
   if (status === "sent") {
     const problems = invoiceProblems(invoice);
     if (problems.length) {
@@ -1399,9 +1413,12 @@ function paintSheet({ animate = false } = {}) {
   const stamp =
     invoice.status === "paid"
       ? `<div class="stamp stamp-paid">PAID</div>`
-      : invoice.status === "draft"
-        ? `<div class="stamp stamp-draft">DRAFT</div>`
-        : "";
+      : invoice.status === "cancelled"
+        ? `<div class="stamp stamp-cancelled">CANCELLED</div>`
+        : invoice.status === "draft"
+          ? `<div class="stamp stamp-draft">DRAFT</div>`
+          : "";
+  const voided = invoice.status === "cancelled";
   const businessLines = [
     marked("", business.address),
     marked("", business.email),
@@ -1512,14 +1529,15 @@ function paintSheet({ animate = false } = {}) {
         ${taxRows(invoiceLines(invoice))
           .map((row) => `<div><span>Tax ${esc(row.rate)}%</span><span>${money(row.amount)}</span></div>`)
           .join("")}
-        <div class="grand"><span>Total</span><span>${money(sums.total)}</span></div>
+        <div class="grand${voided ? " voided" : ""}"><span>Total</span><span>${money(sums.total)}</span></div>
+        ${voided ? `<div class="grand"><span>Due</span><span>${money(0)}</span></div>` : ""}
       </div>
       ${
-        accountBlocks.length
-          ? `<section class="payment"><h3>Payment</h3>${accountBlocks.map((block) => `<p>${esc(block)}</p>`).join("")}</section>`
-          : ""
+        voided || !accountBlocks.length
+          ? ""
+          : `<section class="payment"><h3>Payment</h3>${accountBlocks.map((block) => `<p>${esc(block)}</p>`).join("")}</section>`
       }
-      ${paymentTerms(invoice) ? `<p class="notes">${esc(paymentTerms(invoice))}</p>` : ""}
+      ${voided ? `<p class="notes">Cancelled. This invoice is not payable.</p>` : paymentTerms(invoice) ? `<p class="notes">${esc(paymentTerms(invoice))}</p>` : ""}
       ${invoice.notes && !isGeneratedPaymentNote(invoice.notes) ? `<p class="notes">${esc(invoice.notes)}</p>` : ""}
     </article>
   `;
