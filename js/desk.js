@@ -83,6 +83,7 @@ function prepareDesk(desk) {
   (desk.clients || []).forEach(adoptTaxId);
   (desk.invoices || []).forEach((invoice) => {
     invoice.issued = Boolean(invoice.issued) || invoice.status !== "draft";
+    invoice.type = invoice.type === "expense" ? "expense" : "invoice";
     invoice.dateFormat = knownDateFormat(invoice.dateFormat);
     (invoice.items || []).forEach((item) => {
       if (item.tax == null || item.tax === "") item.tax = Number(invoice.taxRate) || 0;

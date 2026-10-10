@@ -91,9 +91,14 @@ function statusLabel(invoice) {
   return isOverdue(invoice) ? "overdue" : invoice.status;
 }
 
+function invoiceType(invoice) {
+  return invoice?.type === "expense" ? "expense" : "invoice";
+}
+
 function outstandingTotal() {
   return data.invoices
     .filter((invoice) => {
+      if (invoiceType(invoice) !== "invoice") return false;
       const status = statusLabel(invoice);
       return status === "sent" || status === "overdue";
     })
@@ -103,6 +108,11 @@ function outstandingTotal() {
 function paidTotal() {
   const year = today().slice(0, 4);
   return data.invoices
-    .filter((invoice) => invoice.status === "paid" && String(invoice.issueDate || "").slice(0, 4) === year)
+    .filter(
+      (invoice) =>
+        invoiceType(invoice) === "invoice" &&
+        invoice.status === "paid" &&
+        String(invoice.issueDate || "").slice(0, 4) === year
+    )
     .reduce((sum, invoice) => sum + totals(invoice).total, 0);
 }

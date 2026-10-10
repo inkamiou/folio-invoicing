@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   issue_date TEXT NOT NULL DEFAULT '',
   due_date TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'draft',
+  type TEXT NOT NULL DEFAULT 'invoice',
   notes TEXT NOT NULL DEFAULT '',
   tax_rate REAL NOT NULL DEFAULT 0,
   issued INTEGER NOT NULL DEFAULT 0,
@@ -138,6 +139,7 @@ def ensure_columns(connection):
         ("clients", "tax_id", "TEXT NOT NULL DEFAULT ''"),
         ("invoices", "issued", "INTEGER NOT NULL DEFAULT 0"),
         ("invoices", "business_id", "TEXT NOT NULL DEFAULT ''"),
+        ("invoices", "type", "TEXT NOT NULL DEFAULT 'invoice'"),
         ("bank_accounts", "business_id", "TEXT NOT NULL DEFAULT ''"),
         ("invoice_items", "tax", "REAL"),
     )
@@ -146,6 +148,8 @@ def ensure_columns(connection):
         if column not in names:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     connection.execute("UPDATE invoices SET issued = 1 WHERE status != 'draft' AND issued = 0")
+    if "type" in {row["name"] for row in connection.execute("PRAGMA table_info(invoices)")}:
+        connection.execute("UPDATE invoices SET type = 'invoice' WHERE type IS NULL OR type NOT IN ('invoice', 'expense')")
 
 
 def ensure_item_shape(connection):
@@ -359,6 +363,10 @@ def _date_format(value):
     return text if text in {"iso", "dmy", "mdy"} else "iso"
 
 
+def _invoice_type(value):
+    return "expense" if _text(value).strip() == "expense" else "invoice"
+
+
 def _number_length(value):
     try:
         length = int(value)
@@ -473,6 +481,7 @@ def load_desk():
                     "issueDate": invoice["issue_date"],
                     "dueDate": invoice["due_date"],
                     "status": invoice["status"],
+                    "type": _invoice_type(invoice["type"]),
                     "notes": invoice["notes"],
                     "taxRate": invoice["tax_rate"],
                     "issued": bool(invoice["issued"]),
@@ -664,8 +673,8 @@ def save_desk(desk):
             connection.execute(
                 """
                 INSERT INTO invoices (
-                  id, number, client_id, issue_date, due_date, status, notes, tax_rate, issued, date_format, business_id, position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  id, number, client_id, issue_date, due_date, status, type, notes, tax_rate, issued, date_format, business_id, position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     invoice_id,
@@ -674,6 +683,7 @@ def save_desk(desk):
                     _text(invoice.get("issueDate")),
                     _text(invoice.get("dueDate")),
                     _text(invoice.get("status")) or "draft",
+                    _invoice_type(invoice.get("type")),
                     _text(invoice.get("notes")),
                     _number(invoice.get("taxRate")),
                     1 if invoice.get("issued") or (_text(invoice.get("status")) or "draft") != "draft" else 0,

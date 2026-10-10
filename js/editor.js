@@ -21,13 +21,14 @@ function renderEditor() {
       <form class="editor-form" id="invoice-form">
         <button type="button" class="back" id="back">← Invoices</button>
         <div class="editor-head">
-          <h2>${invoiceIsPending(invoice) ? "New invoice" : "Edit"}</h2>
+          <h2>${editorTitle(invoice)}</h2>
           <div class="editor-tools">
             <button type="button" class="btn" id="draft-preview" aria-pressed="${ui.preview}">Draft Preview</button>
             <span class="status status-${statusLabel(invoice)}">${statusLabel(invoice)}</span>
           </div>
         </div>
         <div class="stack">
+          ${typeToggle(invoice)}
           <div class="editor-identity">
             <label><span>Supplier</span>
               <select data-field="businessId" data-placeholder="Select a supplier">
@@ -102,6 +103,16 @@ function renderEditor() {
     if (event.target.id === "sheet-wrap") setPreview(false);
   });
   main.querySelector("#invoice-form").addEventListener("input", onInvoiceInput);
+  main.querySelectorAll("[data-invoice-type]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const next = button.dataset.invoiceType === "expense" ? "expense" : "invoice";
+      if (invoiceType(invoice) === next) return;
+      invoice.type = next;
+      save();
+      render();
+      main.querySelector(`[data-invoice-type="${next}"]`)?.focus();
+    });
+  });
   const numberInput = main.querySelector('[data-field="number"]');
   numberInput.dataset.settled = numberInput.value.trim();
   numberInput.addEventListener("blur", (event) => {
@@ -194,6 +205,24 @@ function renderEditor() {
     button.addEventListener("click", () => setStatus(button.dataset.status));
   });
   enhanceSelects(main);
+}
+
+function editorTitle(invoice) {
+  if (!invoiceIsPending(invoice)) return "Edit";
+  return invoiceType(invoice) === "expense" ? "New expense" : "New invoice";
+}
+
+function typeToggle(invoice) {
+  const type = invoiceType(invoice);
+  return `
+    <div class="type-field">
+      <span class="field-label" id="type-label">Type</span>
+      <div class="type-toggle" role="radiogroup" aria-labelledby="type-label">
+        <button type="button" role="radio" data-invoice-type="invoice" aria-checked="${type === "invoice"}">Sales invoice</button>
+        <button type="button" role="radio" data-invoice-type="expense" aria-checked="${type === "expense"}">Expense reimbursement</button>
+      </div>
+    </div>
+  `;
 }
 
 function statusActions(invoice) {

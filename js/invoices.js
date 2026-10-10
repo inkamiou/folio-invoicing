@@ -31,6 +31,7 @@ function createInvoice() {
     issueDate: today(),
     dueDate: plusDays(14),
     status: "draft",
+    type: "invoice",
     issued: false,
     dateFormat: dateFormat(),
     notes: "",
@@ -237,7 +238,8 @@ function visibleInvoices() {
     if (ui.toDate && invoice.issueDate > ui.toDate) return false;
     if (!query) return true;
     const client = clientById(invoice.clientId);
-    return [invoice.number, client?.name, client?.email].join(" ").toLowerCase().includes(query);
+    const kind = invoiceType(invoice) === "expense" ? "expense reimbursement" : "";
+    return [invoice.number, client?.name, client?.email, kind].join(" ").toLowerCase().includes(query);
   });
 }
 
@@ -252,9 +254,10 @@ function paintInvoiceRows() {
       const client = clientById(invoice.clientId);
       const status = statusLabel(invoice);
       const voided = invoice.status === "cancelled";
+      const expense = invoiceType(invoice) === "expense";
       return `
-        <tr class="invoice-row${voided ? " invoice-cancelled" : ""}" data-open="${invoice.id}">
-          <td class="num"><button type="button" class="row-open" data-open="${invoice.id}">${esc(invoice.number)}</button></td>
+        <tr class="invoice-row${voided ? " invoice-cancelled" : ""}${expense ? " invoice-expense" : ""}" data-open="${invoice.id}">
+          <td class="num"><span class="num-line"><button type="button" class="row-open" data-open="${invoice.id}">${esc(invoice.number)}</button>${expense ? `<span class="kind">Expense</span>` : ""}</span></td>
           <td>${esc(client?.name || "No client")}</td>
           <td>${esc(formatDate(invoice.issueDate, invoice.dateFormat))}</td>
           <td>${esc(formatDate(invoice.dueDate, invoice.dateFormat))}</td>

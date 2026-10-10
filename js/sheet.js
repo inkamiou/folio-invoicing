@@ -109,7 +109,7 @@ function paintSheet({ animate = false } = {}) {
           <p class="sheet-meta">${sheetText(businessLines)}</p>
         </div>
         <div>
-          <p class="invoice-word">Invoice</p>
+          <p class="invoice-word">${invoiceType(invoice) === "expense" ? "Expense" : "Invoice"}</p>
           <p class="invoice-no">${esc(invoice.number)}</p>
         </div>
       </header>

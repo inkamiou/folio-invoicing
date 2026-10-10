@@ -275,6 +275,31 @@ tr.invoice-row:hover td {
   font-size: 18px;
 }
 
+.num-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.kind {
+  flex: none;
+  border: 1px solid #c4a48f;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: #6a3d28;
+}
+
+tr.invoice-expense td:first-child {
+  box-shadow: inset 3px 0 0 #c4a48f;
+}
+
 .row-open {
   border: 0;
   padding: 0;
@@ -633,6 +658,42 @@ input[type="number"]::-webkit-outer-spin-button {
 
 #add-business {
   margin-top: 12px;
+}
+
+.type-field {
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.type-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(251, 247, 240, 0.72);
+}
+
+.type-toggle button {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 14px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.type-toggle button[aria-checked="true"] {
+  background: var(--ink);
+  color: var(--sheet);
+}
+
+.type-toggle button[data-invoice-type="expense"][aria-checked="true"] {
+  background: var(--copper);
+  color: #fffaf6;
 }
 
 .editor-identity {
