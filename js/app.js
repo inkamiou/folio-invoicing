@@ -1011,7 +1011,10 @@ function paintLines() {
         </div>
         <button type="button" class="btn btn-quiet" data-clear="${item.id}">Clear</button>
       </div>
-      ${canRemove ? `<div class="line-summary-actions"><button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button></div>` : ""}
+      <div class="line-summary-actions">
+        <button type="button" class="btn btn-primary" data-add-line="${item.id}">Add</button>
+        ${canRemove ? `<button type="button" class="btn btn-danger" data-remove="${item.id}">Remove</button>` : ""}
+      </div>
     </div>`;
   lines.innerHTML = columns.length
     ? `<table class="line-table">
@@ -1041,6 +1044,20 @@ function paintLines() {
         </tbody>
       </table>`
     : invoice.items.map((item) => openLine(item)).join("");
+  lines.querySelectorAll("[data-add-line]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = invoice.items.find((entry) => entry.id === button.dataset.addLine);
+      if (!item || !lineOnInvoice(item)) {
+        const missing = item && hasMark(item.description) ? "rate" : "description";
+        main.querySelector(`[data-item-id="${item?.id}"][data-item-field="${missing}"]`)?.focus();
+        return;
+      }
+      ui.editingLineId = null;
+      save();
+      paintLines();
+      paintSheet();
+    });
+  });
   lines.querySelectorAll("[data-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.edit === ui.editingLineId) return;
@@ -1595,11 +1612,14 @@ function renderBusiness() {
           <div class="accounts" id="accounts"></div>
           <button type="button" class="btn btn-quiet" id="add-account">Add account</button>
         </div>
-        ${
-          businessHasData(business) || data.businesses.some((item) => item.id !== business.id && businessHasData(item))
-            ? `<div class="line-summary-actions"><button type="button" class="btn btn-danger" id="remove-open-business">Remove</button></div>`
-            : ""
-        }
+        <div class="line-summary-actions">
+          <button type="button" class="btn btn-primary" id="create-business">Create</button>
+          ${
+            businessHasData(business) || data.businesses.some((item) => item.id !== business.id && businessHasData(item))
+              ? `<button type="button" class="btn btn-danger" id="remove-open-business">Remove</button>`
+              : ""
+          }
+        </div>
       </form>
       <div class="actions">
         <button type="button" class="btn" id="export">Export backup</button>
@@ -1692,6 +1712,15 @@ function renderBusiness() {
   paintAccounts();
   paintNumberPreview();
   enhanceSelects(main);
+  main.querySelector("#create-business")?.addEventListener("click", () => {
+    if (!businessHasData(data.business)) {
+      main.querySelector('[data-business="name"]')?.focus();
+      return;
+    }
+    ui.editingBusinessId = null;
+    save();
+    render();
+  });
   main.querySelector("#remove-open-business")?.addEventListener("click", () => {
     data.businesses = data.businesses.filter((item) => item.id !== ui.editingBusinessId);
     data.invoices.forEach((invoice) => {
