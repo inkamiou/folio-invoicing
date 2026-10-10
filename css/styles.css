@@ -535,6 +535,14 @@ input[type="number"]::-webkit-outer-spin-button {
   margin-top: 14px;
 }
 
+.client-form {
+  padding: 16px 0 8px;
+}
+
+#add-client {
+  margin-top: 12px;
+}
+
 .client-card {
   display: flex;
   justify-content: space-between;

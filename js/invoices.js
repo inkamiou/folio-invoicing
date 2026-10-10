@@ -5,6 +5,7 @@ function lastPickedBusinessId() {
 }
 
 function createInvoice() {
+  discardUnsavedClient();
   const open = currentInvoice();
   if (invoiceIsPending(open)) {
     if (!discardPendingInvoice()) return null;
@@ -26,7 +27,7 @@ function createInvoice() {
     id: uid(),
     number,
     businessId,
-    clientId: data.clients[0]?.id || "",
+    clientId: data.clients.find(clientHasName)?.id || "",
     issueDate: today(),
     dueDate: plusDays(14),
     status: "draft",

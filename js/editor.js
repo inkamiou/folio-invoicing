@@ -9,6 +9,7 @@ function renderEditor() {
   const supplier = businessFor(invoice);
   if (supplier) data.business = supplier;
   const clientOptions = data.clients
+    .filter(clientHasName)
     .map(
       (client) =>
         `<option value="${client.id}" ${client.id === invoice.clientId ? "selected" : ""}>${esc(client.name)}</option>`

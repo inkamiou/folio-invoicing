@@ -36,6 +36,7 @@ var ui = {
   toDate: "",
   error: "",
   editingClientId: null,
+  creatingClient: false,
   clientQuery: "",
   preview: false,
   editingLineId: null,
@@ -65,6 +66,7 @@ document.querySelectorAll("[data-nav]").forEach((button) => {
     ui.editingBusinessId = null;
     ui.creatingBusiness = false;
     ui.businessSnapshot = null;
+    discardUnsavedClient();
     if (Array.isArray(data.businesses)) data.businesses = data.businesses.filter(businessHasData);
     document.body.classList.remove("preview-open");
     render();
