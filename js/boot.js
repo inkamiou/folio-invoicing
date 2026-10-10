@@ -12,7 +12,9 @@ function render() {
 }
 
 function paintStats() {
+  const year = today().slice(0, 4);
   document.querySelector("#stat-outstanding").textContent = money(outstandingTotal());
+  document.querySelector("#stat-paid-label").textContent = `Paid (${year})`;
   document.querySelector("#stat-paid").textContent = money(paidTotal());
 }
 

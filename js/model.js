@@ -93,12 +93,16 @@ function statusLabel(invoice) {
 
 function outstandingTotal() {
   return data.invoices
-    .filter((invoice) => invoice.status === "sent")
+    .filter((invoice) => {
+      const status = statusLabel(invoice);
+      return status === "sent" || status === "overdue";
+    })
     .reduce((sum, invoice) => sum + totals(invoice).total, 0);
 }
 
 function paidTotal() {
+  const year = today().slice(0, 4);
   return data.invoices
-    .filter((invoice) => invoice.status === "paid")
+    .filter((invoice) => invoice.status === "paid" && String(invoice.issueDate || "").slice(0, 4) === year)
     .reduce((sum, invoice) => sum + totals(invoice).total, 0);
 }
