@@ -131,6 +131,7 @@ function renderInvoices() {
         )
         .join("")}
     </div>
+    ${businessFilters()}
     <div class="date-range">
       ${rangeField("from", "Issued from", ui.fromDate)}
       ${rangeField("to", "Issued to", ui.toDate)}
@@ -163,6 +164,15 @@ function renderInvoices() {
       ui.filter = button.dataset.filter;
       main.querySelectorAll("[data-filter]").forEach((chip) => {
         chip.setAttribute("aria-pressed", chip.dataset.filter === ui.filter);
+      });
+      paintInvoiceRows();
+    });
+  });
+  main.querySelectorAll("[data-business-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      ui.businessFilter = button.dataset.businessFilter;
+      main.querySelectorAll("[data-business-filter]").forEach((chip) => {
+        chip.setAttribute("aria-pressed", chip.dataset.businessFilter === ui.businessFilter);
       });
       paintInvoiceRows();
     });
@@ -202,9 +212,24 @@ function applyRange(field, restore) {
   paintInvoiceRows();
 }
 
+function businessFilters() {
+  const businesses = data.businesses.filter(businessHasData);
+  if (!businesses.length) return "";
+  if (ui.businessFilter && !businesses.some((business) => business.id === ui.businessFilter)) ui.businessFilter = "";
+  const chips = [
+    `<button type="button" class="chip" data-business-filter="" aria-pressed="${ui.businessFilter ? "false" : "true"}">All businesses</button>`,
+    ...businesses.map(
+      (business) =>
+        `<button type="button" class="chip" data-business-filter="${esc(business.id)}" aria-pressed="${ui.businessFilter === business.id ? "true" : "false"}">${esc(business.name || "Business")}</button>`
+    ),
+  ];
+  return `<div class="filters" role="group" aria-label="Filter by business">${chips.join("")}</div>`;
+}
+
 function visibleInvoices() {
   const query = ui.query.trim().toLowerCase();
   return data.invoices.filter((invoice) => {
+    if (ui.businessFilter && invoice.businessId !== ui.businessFilter) return false;
     if (ui.filter === "sent" && invoice.status !== "sent") return false;
     if (ui.filter !== "all" && ui.filter !== "sent" && statusLabel(invoice) !== ui.filter) return false;
     if (ui.fromDate && invoice.issueDate < ui.fromDate) return false;

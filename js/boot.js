@@ -30,6 +30,7 @@ var ui = {
   view: "invoices",
   invoiceId: null,
   filter: "all",
+  businessFilter: "",
   query: "",
   fromDate: "",
   toDate: "",
