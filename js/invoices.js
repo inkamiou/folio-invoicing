@@ -273,10 +273,29 @@ function sendInvoice(id) {
   if (invoice.issueDate) lines.push(`Issued ${formatDate(invoice.issueDate, invoice.dateFormat)}.`);
   if (invoice.dueDate) lines.push(`Due ${formatDate(invoice.dueDate, invoice.dateFormat)}.`);
   lines.push("", supplier?.name || "Folio");
-  const link = document.createElement("a");
-  link.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(`Invoice ${invoice.number}`)}&body=${encodeURIComponent(lines.join("\n"))}`;
-  link.click();
+  openMailClient(
+    `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(`Invoice ${invoice.number}`)}&body=${encodeURIComponent(lines.join("\n"))}`
+  );
   if (invoice.status === "draft") markInvoiceSent(invoice);
+}
+
+function openMailClient(url) {
+  const bridge = window.webkit?.messageHandlers?.folio;
+  if (bridge) {
+    bridge.postMessage({ type: "mailto", url });
+    return;
+  }
+  if (window.__FOLIO_WIN__ && window.pywebview?.api?.openMail) {
+    window.pywebview.api.openMail(url);
+    return;
+  }
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.setAttribute("aria-hidden", "true");
+  frame.tabIndex = -1;
+  document.body.appendChild(frame);
+  frame.src = url;
+  window.setTimeout(() => frame.remove(), 1500);
 }
 
 function markInvoiceSent(invoice) {

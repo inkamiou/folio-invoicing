@@ -2,6 +2,7 @@
 
 import json
 import mimetypes
+import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -100,6 +101,14 @@ class FolioApi:
         except OSError as exc:
             return f"Folio could not save the backup. {exc}"
         return ""
+
+    def openMail(self, url):
+        if not isinstance(url, str) or not url.lower().startswith("mailto:"):
+            return
+        try:
+            os.startfile(url)
+        except OSError as exc:
+            print(f"Folio could not open the mail client: {exc}", file=sys.stderr)
 
 
 def main():

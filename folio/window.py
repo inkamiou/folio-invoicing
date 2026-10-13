@@ -62,6 +62,9 @@ def on_script_message(_manager, result, webview):
         return
     if message.get("type") == "print":
         GLib.idle_add(print_invoice, webview, message.get("number"))
+        return
+    if message.get("type") == "mailto":
+        GLib.idle_add(open_mailto, webview, message.get("url"))
 
 
 def export_backup(webview, desk):
@@ -168,6 +171,36 @@ def report_error(parent, text, detail):
     report.destroy()
 
 
+def open_mailto(webview, uri):
+    if not isinstance(uri, str) or not uri.lower().startswith("mailto:"):
+        return False
+    window = webview.get_toplevel() if webview is not None else None
+    parent = window if isinstance(window, Gtk.Window) else None
+    try:
+        launched = Gio.AppInfo.launch_default_for_uri(uri, None)
+    except GLib.Error as exc:
+        report_error(parent, "Folio could not open the mail client.", str(exc))
+        return False
+    if not launched:
+        report_error(parent, "Folio could not open the mail client.", "No mail application is available for this link.")
+    return False
+
+
+def on_decide_policy(webview, decision, decision_type):
+    if decision_type not in (
+        WebKit2.PolicyDecisionType.NAVIGATION_ACTION,
+        WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION,
+    ):
+        return False
+    action = decision.get_navigation_action()
+    uri = action.get_request().get_uri() if action is not None else ""
+    if not str(uri or "").lower().startswith("mailto:"):
+        return False
+    decision.ignore()
+    GLib.idle_add(open_mailto, webview, uri)
+    return True
+
+
 def build_webview():
     manager = WebKit2.UserContentManager()
     manager.register_script_message_handler("folio")
@@ -180,6 +213,7 @@ def build_webview():
     )
     manager.add_script(script)
     webview = WebKit2.WebView.new_with_user_content_manager(manager)
+    webview.connect("decide-policy", on_decide_policy)
     manager.connect("script-message-received::folio", on_script_message, webview)
     settings = webview.get_settings()
     settings.set_allow_file_access_from_file_urls(True)
