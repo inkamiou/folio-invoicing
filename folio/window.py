@@ -15,7 +15,7 @@ from folio.db import load_desk, save_desk
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "index.html"
-ICON = ROOT / "assets" / "folio.png"
+ICON = ROOT / "assets" / "folio_logo.svg"
 
 
 def launcher_text():
