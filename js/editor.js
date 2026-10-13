@@ -23,7 +23,7 @@ function renderEditor() {
         <div class="editor-head">
           <h2>${editorTitle(invoice)}</h2>
           <div class="editor-tools">
-            <button type="button" class="btn" id="draft-preview" aria-pressed="${ui.preview}">Draft Preview</button>
+            <button type="button" class="btn" id="draft-preview" aria-pressed="${ui.preview}">${invoice.status === "draft" || invoiceIsPending(invoice) ? "Draft Preview" : "Preview"}</button>
             <span class="status status-${statusLabel(invoice)}">${statusLabel(invoice)}</span>
           </div>
         </div>

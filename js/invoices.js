@@ -149,6 +149,7 @@ function renderInvoices() {
             <th>Due</th>
             <th>Status</th>
             <th class="amount">Total</th>
+            <th class="row-actions">Actions</th>
           </tr>
         </thead>
         <tbody id="invoice-rows"></tbody>
@@ -243,6 +244,58 @@ function visibleInvoices() {
   });
 }
 
+function sendIcon() {
+  return `<svg class="row-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.8 8.2 14.2 2.2 9.2 14.2 7.6 8.8 1.8 8.2Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.6 8.8 14.2 2.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`;
+}
+
+function invoiceActions(invoice) {
+  return `<div class="row-action-bar"><button type="button" class="btn btn-row" data-send="${esc(invoice.id)}" aria-label="Send email" title="Send email">${sendIcon()}</button></div>`;
+}
+
+function sendInvoice(id) {
+  const invoice = data.invoices.find((item) => item.id === id);
+  if (!invoice) return;
+  const problems = invoiceProblems(invoice);
+  if (problems.length) {
+    alert(problems[0]);
+    return;
+  }
+  const client = clientById(invoice.clientId);
+  const email = String(client?.email || "").trim();
+  if (!email) {
+    alert("Add an email address for this client before sending.");
+    return;
+  }
+  const supplier = businessFor(invoice);
+  const total = money(invoice.status === "cancelled" ? 0 : totals(invoice).total);
+  const lines = [`Hello${client?.name ? ` ${client.name}` : ""},`, ""];
+  lines.push(`Please find invoice ${invoice.number} for ${total}.`);
+  if (invoice.issueDate) lines.push(`Issued ${formatDate(invoice.issueDate, invoice.dateFormat)}.`);
+  if (invoice.dueDate) lines.push(`Due ${formatDate(invoice.dueDate, invoice.dateFormat)}.`);
+  lines.push("", supplier?.name || "Folio");
+  const link = document.createElement("a");
+  link.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(`Invoice ${invoice.number}`)}&body=${encodeURIComponent(lines.join("\n"))}`;
+  link.click();
+  if (invoice.status === "draft") markInvoiceSent(invoice);
+}
+
+function markInvoiceSent(invoice) {
+  if (!invoice || invoice.status !== "draft") return false;
+  const problems = invoiceProblems(invoice);
+  if (problems.length) {
+    alert(problems[0]);
+    return false;
+  }
+  const supplier = businessFor(invoice);
+  if (supplier) data.business = supplier;
+  if (!invoice.issued) confirmNextNumber(indexFromNumber(invoice.number, supplier || data.business));
+  invoice.issued = true;
+  invoice.status = "sent";
+  save();
+  render();
+  return true;
+}
+
 function paintInvoiceRows() {
   const rows = main.querySelector("#invoice-rows");
   const empty = main.querySelector("#invoice-empty");
@@ -263,12 +316,19 @@ function paintInvoiceRows() {
           <td>${esc(formatDate(invoice.dueDate, invoice.dateFormat))}</td>
           <td><span class="status status-${status}">${status}</span></td>
           <td class="amount">${money(voided ? 0 : totals(invoice).total)}</td>
+          <td class="row-actions">${invoiceActions(invoice)}</td>
         </tr>
       `;
     })
     .join("");
   rows.querySelectorAll("[data-open]").forEach((row) => {
     row.addEventListener("click", () => openInvoice(row.dataset.open));
+  });
+  rows.querySelectorAll("[data-send]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      sendInvoice(button.dataset.send);
+    });
   });
   empty.innerHTML = invoices.length
     ? ""

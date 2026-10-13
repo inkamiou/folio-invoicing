@@ -67,6 +67,21 @@ button {
   color: #f4efe6;
 }
 
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-logo {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  padding: 3px;
+  border-radius: 12px;
+  background: #f4efe6;
+}
+
 .kicker {
   margin: 0 0 6px;
   letter-spacing: 0.16em;
@@ -242,7 +257,7 @@ main {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 680px;
+  min-width: 760px;
 }
 
 th {
@@ -314,6 +329,40 @@ tr.invoice-expense td:first-child {
   font-weight: 600;
 }
 
+.ledger th.row-actions,
+.ledger td.row-actions {
+  width: 1%;
+  padding-left: 8px;
+  padding-right: 14px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.row-action-bar {
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.btn-row {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: rgba(251, 247, 240, 0.92);
+}
+
+.row-icon {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.btn-row:hover {
+  background: #fff;
+}
+
 .status {
   display: inline-flex;
   align-items: center;
@@ -323,6 +372,11 @@ tr.invoice-expense td:first-child {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   background: #efe8dc;
+}
+
+.status-draft {
+  background: #efe8dc;
+  color: var(--muted);
 }
 
 .status-sent {
