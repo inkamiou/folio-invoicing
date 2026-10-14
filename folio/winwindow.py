@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlencode, urlparse
 
 from folio.db import load_desk, save_desk
-from folio.mail import email_fields, mail_pdf_path, save_download
+from folio.mail import downloads_folder, email_fields, mail_pdf_path, save_download
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "index.html"
@@ -72,6 +72,26 @@ def copy_download_path(path):
         subprocess.run(["clip"], input=str(path), text=True, check=False, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return
+
+
+def show_download(path):
+    try:
+        target = Path(path).resolve()
+    except (OSError, TypeError):
+        return False
+    if not target.is_file():
+        return False
+    try:
+        root = downloads_folder().resolve()
+    except OSError:
+        return False
+    if not target.is_relative_to(root):
+        return False
+    try:
+        subprocess.Popen(["explorer", f"/select,{target}"], stdin=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
 
 
 def open_mailto(to, subject, body):
@@ -273,7 +293,14 @@ class FolioApi:
             return "error:The email was cancelled."
         open_mailto(to, subject, body)
         copy_download_path(pdf)
+        if show_download(pdf):
+            return f"opened:The invoice PDF is in Downloads: {pdf}. That folder is open, and the path is copied."
         return f"opened:The invoice PDF is in Downloads: {pdf}. The path is copied."
+
+    def revealInvoice(self, path):
+        if show_download(path):
+            return ""
+        return "error:Folio could not open the invoice folder."
 
 
 def main():

@@ -15,7 +15,7 @@ gi.require_version("WebKit2", "4.1")
 from gi.repository import Gdk, Gio, GLib, Gtk, WebKit2
 
 from folio.db import load_desk, save_desk
-from folio.mail import email_fields, mail_pdf_path, pdf_name, save_download
+from folio.mail import downloads_folder, email_fields, mail_pdf_path, pdf_name, save_download
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "index.html"
@@ -69,6 +69,9 @@ def on_script_message(_manager, result, webview):
         return
     if message.get("type") == "mailto":
         GLib.idle_add(open_mailto, webview, message.get("url"))
+        return
+    if message.get("type") == "reveal":
+        GLib.idle_add(reveal_invoice, webview, message)
         return
     if message.get("type") == "email":
         GLib.idle_add(email_invoice, webview, message)
@@ -240,6 +243,7 @@ def _ignore_js(webview, result, _data):
 def launch_composed_mail(parent, to, subject, body, attachment, number):
     published = publish_download(attachment, number)
     handler = mailto_desktop()
+    folder_open = False
     if "evolution" in handler:
         try:
             launched = Gio.AppInfo.launch_default_for_uri(evolution_mailto(to, subject, body, published), None)
@@ -250,17 +254,20 @@ def launch_composed_mail(parent, to, subject, body, attachment, number):
             report_error(parent, "Folio could not open the mail client.", "No mail application is available for this link.")
         return
     if mail_handler_is_browser(handler):
-        explain_browser_attachment(parent, published)
+        folder_open = explain_browser_attachment(parent, published)
         command = ["xdg-email", "--utf8", "--subject", subject, "--body", body, to]
     else:
         command = ["xdg-email", "--utf8", "--attach", str(published), "--subject", subject, "--body", body, to]
     try:
         subprocess.Popen(command, start_new_session=True, stdin=subprocess.DEVNULL)
     except OSError as exc:
+        if not folder_open:
+            folder_open = show_in_folder(published)
+        found = "That folder is open." if folder_open else "Folio could not open the folder."
         report_error(
             parent,
             "Folio could not open the mail client.",
-            f"{exc}\nThe invoice PDF is in Downloads:\n{published}",
+            f"{exc}\nThe invoice PDF is in Downloads:\n{published}\n{found}",
         )
 
 
@@ -305,17 +312,94 @@ def publish_download(source, number):
 
 def explain_browser_attachment(parent, attachment):
     copy_invoice_file(attachment)
-    report_notice(
-        parent,
-        "The invoice PDF is in Downloads.",
-        f"{attachment.name} is copied, so you can paste the path into the message.\n{attachment}",
-    )
+    opened = show_in_folder(attachment)
+    if opened:
+        detail = f"{attachment.name} is in Downloads, and that folder is open. The path is copied, so you can paste it into the message."
+    else:
+        detail = (
+            f"{attachment.name} is in Downloads. Folio could not open the folder. "
+            f"The path is copied to clipboard.\n{attachment}"
+        )
+    report_notice(parent, "The invoice PDF is in Downloads.", detail)
+    return opened
+
+
+def show_in_folder(path):
+    try:
+        target = Path(path).resolve()
+    except (OSError, TypeError):
+        return False
+    if not target.is_file():
+        return False
+    if show_file_items(target):
+        return True
+    try:
+        return bool(Gio.AppInfo.launch_default_for_uri(target.parent.as_uri(), None))
+    except GLib.Error:
+        return False
+
+
+def show_file_items(path):
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        proxy = Gio.DBusProxy.new_sync(
+            bus,
+            Gio.DBusProxyFlags.NONE,
+            None,
+            "org.freedesktop.FileManager1",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1",
+            None,
+        )
+        proxy.call_sync(
+            "ShowItems",
+            GLib.Variant("(ass)", ([path.as_uri()], "")),
+            Gio.DBusCallFlags.NONE,
+            3000,
+            None,
+        )
+    except (GLib.Error, TypeError):
+        return False
+    return True
+
+
+def reveal_invoice(webview, message):
+    window = webview.get_toplevel() if webview is not None else None
+    parent = window if isinstance(window, Gtk.Window) else None
+    path = download_for_reveal(message)
+    if path is None or not path.is_file():
+        report_notice(parent, "The invoice PDF is in Downloads.", "Folio could not open that folder.")
+        return False
+    if not show_in_folder(path):
+        report_notice(parent, "The invoice PDF is in Downloads.", f"Folio could not open the folder.\n{path}")
+    return False
+
+
+def download_for_reveal(message):
+    if not isinstance(message, dict):
+        return None
+    try:
+        root = downloads_folder().resolve()
+    except OSError:
+        return None
+    raw = message.get("path")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            path = Path(raw).expanduser().resolve()
+        except OSError:
+            path = None
+        if path is not None and path.is_relative_to(root):
+            return path
+    return (root / pdf_name(message.get("number"))).resolve()
 
 
 def copy_invoice_file(path):
-    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-    clipboard.set_text(str(path.resolve()), -1)
-    clipboard.store()
+    try:
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(str(Path(path).resolve()), -1)
+        clipboard.store()
+    except Exception as exc:
+        print(f"Folio could not copy the invoice path: {exc}", file=sys.stderr)
 
 
 def confirm_replace(parent, name):

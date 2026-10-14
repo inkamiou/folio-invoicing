@@ -179,6 +179,17 @@ main {
   color: var(--muted);
 }
 
+.send-note {
+  margin: -6px 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--copper);
+  border-radius: 10px;
+  background: var(--sheet);
+  color: var(--ink);
+  font-size: 14px;
+}
+
 .hint {
   margin: 8px 0 0;
   color: var(--muted);

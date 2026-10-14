@@ -125,6 +125,7 @@ function renderInvoices() {
       </div>
       <input id="search" class="search" type="search" placeholder="Search number or client" value="${esc(ui.query)}" />
     </div>
+    ${ui.sendNote ? `<p class="send-note" role="status">${esc(ui.sendNote)}</p>` : ""}
     <div class="filters" role="group" aria-label="Filter invoices">
       ${["all", "draft", "sent", "paid", "overdue", "cancelled"]
         .map(
@@ -288,6 +289,7 @@ async function sendInvoice(id) {
   if (sharing) {
     const shared = await sharing;
     if (shared) {
+      ui.sendNote = "";
       if (wasDraft) markInvoiceSent(invoice);
       return;
     }
@@ -303,8 +305,10 @@ async function sendInvoice(id) {
     openMailClient(
       `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
     );
-  }
+    ui.sendNote = await placeInvoicePdf(printable);
+  } else ui.sendNote = "";
   if (wasDraft) markInvoiceSent(invoice);
+  else render();
 }
 
 function mountMailSheet(invoice) {
@@ -560,6 +564,79 @@ function openMailClient(url) {
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+async function placeInvoicePdf(invoice) {
+  const file = invoicePdfFile(invoice);
+  let revealed = false;
+  try {
+    revealed = await revealInvoiceFolder(file, invoice.number);
+  } catch {
+    revealed = false;
+  }
+  if (revealed) return "The invoice folder is open. Attach the PDF to the message.";
+  try {
+    downloadInvoiceFile(file);
+  } catch {
+    return "Folio opened the message, but could not save the invoice PDF.";
+  }
+  return `${file.name} is in your Downloads folder. Attach it to the message.`;
+}
+
+async function revealInvoiceFolder(file, number) {
+  const path = knownInvoicePath(file);
+  if (!path) return false;
+  const showInFolder = window.electron?.shell?.showItemInFolder;
+  if (typeof showInFolder === "function") {
+    showInFolder(path);
+    return true;
+  }
+  const webview = window.chrome?.webview;
+  const hostShell = webview?.hostObjects?.sync?.shell || webview?.hostObjects?.shell;
+  const hostShow = hostShell?.showItemInFolder || hostShell?.ShowItemInFolder;
+  if (typeof hostShow === "function") {
+    await hostShow(path);
+    return true;
+  }
+  if (webview && typeof webview.postMessage === "function") {
+    try {
+      webview.postMessage({ type: "reveal", path });
+    } catch {
+      /* This host cannot open the folder. Another bridge, or the download, still can. */
+    }
+  }
+  const bridge = window.webkit?.messageHandlers?.folio;
+  if (bridge) {
+    bridge.postMessage({ type: "reveal", path, number });
+    return true;
+  }
+  const reveal = window.pywebview?.api?.revealInvoice;
+  if (typeof reveal === "function") {
+    const result = await reveal(path);
+    return result !== false && !(typeof result === "string" && result.startsWith("error:"));
+  }
+  return false;
+}
+
+function knownInvoicePath(file) {
+  const name = file?.name || "";
+  const candidates = [window.__FOLIO_INVOICE_PATH__, window.folio?.invoicePath];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate && (!name || candidate.endsWith(name))) return candidate;
+  }
+  return "";
+}
+
+function downloadInvoiceFile(file) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name || "invoice.pdf";
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function markInvoiceSent(invoice) {

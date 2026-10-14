@@ -51,6 +51,7 @@ var ui = {
   pendingInvoice: null,
   pendingSnapshot: "",
   pendingNumber: "",
+  sendNote: "",
 };
 
 ui.lastBusinessId =
