@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlencode, urlparse
 
 from folio.db import load_desk, save_desk
-from folio.mail import email_fields, mail_pdf_path
+from folio.mail import email_fields, mail_pdf_path, save_download
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "index.html"
@@ -64,6 +64,13 @@ class PageHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, fmt, *args):
+        return
+
+
+def copy_download_path(path):
+    try:
+        subprocess.run(["clip"], input=str(path), text=True, check=False, timeout=5)
+    except (OSError, subprocess.SubprocessError):
         return
 
 
@@ -255,13 +262,18 @@ class FolioApi:
         if pdf is None:
             open_mailto(to, subject, body)
             return "opened:Folio opened the message without the PDF."
+        try:
+            pdf = save_download(pdf, number)
+        except OSError as exc:
+            print(f"Folio could not save the invoice in Downloads: {exc}", file=sys.stderr)
         result = mapi_send(to, subject, body, pdf)
         if result == 0:
             return ""
         if result == 1:
             return "error:The email was cancelled."
         open_mailto(to, subject, body)
-        return f"opened:Folio opened the message without the PDF. The file is saved at {pdf}."
+        copy_download_path(pdf)
+        return f"opened:The invoice PDF is in Downloads: {pdf}. The path is copied."
 
 
 def main():

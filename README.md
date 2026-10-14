@@ -13,7 +13,7 @@ Invoice data is not uploaded. The desktop apps write a SQLite file. The browser 
 - Track draft, sent, paid, and cancelled invoices. A sent invoice past its due date shows as overdue.
 - See outstanding invoices, and how much was paid in the current year.
 - Filter the list by status, business, issue dates, or a search across number and client.
-- Open the default mail client with a short message and the invoice PDF attached. The client needs an email address. A draft is marked sent when that message is handed to the mail program. Folio does not send the message itself. A web browser set as the mail program cannot take the file; Folio still opens the message, saves the PDF, and copies its path so you can attach it. The browser copy of Folio fills in the message and does not attach the PDF.
+- Open the default mail client with a short message and the invoice PDF attached. The client needs an email address. A draft is marked sent when that message is handed to the mail program. Folio does not send the message itself. A web browser set as the mail program cannot take the file. Folio still opens the message, saves the PDF in Downloads, and copies that path so you can find it and attach it. The browser copy of Folio fills in the message and does not attach the PDF.
 - Save a PDF. On Linux, choose a folder and Folio writes `<invoice-number>.pdf`. On Windows and in the browser, use the print dialog.
 - Export the whole desk as JSON from the Business screen, and import a backup later. Import replaces the invoices, clients, and businesses on that copy of Folio.
 

@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -46,6 +47,40 @@ def mail_cache():
         folder = root / "folio"
     folder.mkdir(parents=True, exist_ok=True)
     return folder
+
+
+def downloads_folder():
+    if sys.platform == "win32":
+        folder = Path.home() / "Downloads"
+    else:
+        folder = xdg_user_dir("XDG_DOWNLOAD_DIR", Path.home() / "Downloads")
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def xdg_user_dir(key, fallback):
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    config = Path(config_home) if config_home else Path.home() / ".config"
+    try:
+        lines = (config / "user-dirs.dirs").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return fallback
+    for line in lines:
+        text = line.strip()
+        if not text.startswith(f"{key}="):
+            continue
+        value = text.split("=", 1)[1].strip().strip('"').strip("'")
+        value = value.replace("$HOME", str(Path.home()))
+        return Path(os.path.expanduser(os.path.expandvars(value)))
+    return fallback
+
+
+def save_download(source, number):
+    source = Path(source)
+    destination = downloads_folder() / pdf_name(number)
+    if source.resolve() != destination.resolve():
+        shutil.copyfile(source, destination)
+    return destination
 
 
 def mail_pdf_path(number):

@@ -15,7 +15,7 @@ gi.require_version("WebKit2", "4.1")
 from gi.repository import Gdk, Gio, GLib, Gtk, WebKit2
 
 from folio.db import load_desk, save_desk
-from folio.mail import email_fields, mail_pdf_path, pdf_name
+from folio.mail import email_fields, mail_pdf_path, pdf_name, save_download
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "index.html"
@@ -175,7 +175,7 @@ def email_invoice(webview, message):
             if not ok:
                 report_error(parent, "Folio could not attach the invoice.", detail or "The PDF was not created.")
                 return False
-            launch_composed_mail(parent, to, subject, body, destination)
+            launch_composed_mail(parent, to, subject, body, destination, number)
             return False
 
         GLib.idle_add(complete)
@@ -237,11 +237,12 @@ def _ignore_js(webview, result, _data):
         return
 
 
-def launch_composed_mail(parent, to, subject, body, attachment):
+def launch_composed_mail(parent, to, subject, body, attachment, number):
+    published = publish_download(attachment, number)
     handler = mailto_desktop()
     if "evolution" in handler:
         try:
-            launched = Gio.AppInfo.launch_default_for_uri(evolution_mailto(to, subject, body, attachment), None)
+            launched = Gio.AppInfo.launch_default_for_uri(evolution_mailto(to, subject, body, published), None)
         except GLib.Error as exc:
             report_error(parent, "Folio could not open the mail client.", str(exc))
             return
@@ -249,17 +250,17 @@ def launch_composed_mail(parent, to, subject, body, attachment):
             report_error(parent, "Folio could not open the mail client.", "No mail application is available for this link.")
         return
     if mail_handler_is_browser(handler):
-        explain_browser_attachment(parent, attachment)
+        explain_browser_attachment(parent, published)
         command = ["xdg-email", "--utf8", "--subject", subject, "--body", body, to]
     else:
-        command = ["xdg-email", "--utf8", "--attach", str(attachment), "--subject", subject, "--body", body, to]
+        command = ["xdg-email", "--utf8", "--attach", str(published), "--subject", subject, "--body", body, to]
     try:
         subprocess.Popen(command, start_new_session=True, stdin=subprocess.DEVNULL)
     except OSError as exc:
         report_error(
             parent,
             "Folio could not open the mail client.",
-            f"{exc}\nThe invoice PDF is saved at {attachment}",
+            f"{exc}\nThe invoice PDF is in Downloads:\n{published}",
         )
 
 
@@ -294,14 +295,27 @@ def evolution_mailto(to, subject, body, attachment):
     return f"mailto:{quote(to)}?{query}"
 
 
+def publish_download(source, number):
+    try:
+        return save_download(source, number)
+    except OSError as exc:
+        print(f"Folio could not save the invoice in Downloads: {exc}", file=sys.stderr)
+        return Path(source)
+
+
 def explain_browser_attachment(parent, attachment):
-    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-    clipboard.set_text(str(attachment), -1)
+    copy_invoice_file(attachment)
     report_notice(
         parent,
-        "Attach the invoice PDF to the message.",
-        f"This mail program cannot take the file automatically. The path is copied:\n{attachment}",
+        "The invoice PDF is in Downloads.",
+        f"{attachment.name} is copied, so you can paste the path into the message.\n{attachment}",
     )
+
+
+def copy_invoice_file(path):
+    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+    clipboard.set_text(str(path.resolve()), -1)
+    clipboard.store()
 
 
 def confirm_replace(parent, name):
