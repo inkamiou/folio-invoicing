@@ -252,7 +252,7 @@ function invoiceActions(invoice) {
   return `<div class="row-action-bar"><button type="button" class="btn btn-row" data-send="${esc(invoice.id)}" aria-label="Send email" title="Send email">${sendIcon()}</button></div>`;
 }
 
-function sendInvoice(id) {
+async function sendInvoice(id) {
   const invoice = data.invoices.find((item) => item.id === id);
   if (!invoice) return;
   const problems = invoiceProblems(invoice);
@@ -267,16 +267,281 @@ function sendInvoice(id) {
     return;
   }
   const supplier = businessFor(invoice);
-  const total = money(invoice.status === "cancelled" ? 0 : totals(invoice).total);
+  const previous = data.business;
+  if (supplier) data.business = supplier;
+  let total = "";
+  try {
+    total = money(invoice.status === "cancelled" ? 0 : totals(invoice).total);
+  } finally {
+    data.business = previous;
+  }
   const lines = [`Hello${client?.name ? ` ${client.name}` : ""},`, ""];
   lines.push(`Please find invoice ${invoice.number} for ${total}.`);
   if (invoice.issueDate) lines.push(`Issued ${formatDate(invoice.issueDate, invoice.dateFormat)}.`);
   if (invoice.dueDate) lines.push(`Due ${formatDate(invoice.dueDate, invoice.dateFormat)}.`);
   lines.push("", supplier?.name || "Folio");
-  openMailClient(
-    `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(`Invoice ${invoice.number}`)}&body=${encodeURIComponent(lines.join("\n"))}`
+  const subject = `Invoice ${invoice.number}`;
+  const body = lines.join("\n");
+  const wasDraft = invoice.status === "draft";
+  const printable = Object.assign({}, invoice, { status: wasDraft ? "sent" : invoice.status });
+  const sharing = shareInvoiceFile(invoicePdfFile(printable), subject, body);
+  if (sharing) {
+    const shared = await sharing;
+    if (shared) {
+      if (wasDraft) markInvoiceSent(invoice);
+      return;
+    }
+  }
+  mountMailSheet(printable);
+  const outcome = await deliverInvoiceEmail(invoice, email, subject, body);
+  if (outcome === "failed") {
+    clearMailSheet();
+    return;
+  }
+  if (outcome === "browser") {
+    clearMailSheet();
+    openMailClient(
+      `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    );
+  }
+  if (wasDraft) markInvoiceSent(invoice);
+}
+
+function mountMailSheet(invoice) {
+  const host = document.getElementById("mail-sheet");
+  if (!host) return;
+  const previous = data.business;
+  const supplier = businessFor(invoice);
+  if (supplier) data.business = supplier;
+  try {
+    host.innerHTML = sheetMarkup(invoice);
+  } finally {
+    data.business = previous;
+  }
+  host.querySelector(".sheet")?.classList.add("sheet-quiet");
+  document.body.classList.add("mail-print");
+}
+
+function clearMailSheet() {
+  document.body.classList.remove("mail-print");
+  document.getElementById("mail-sheet")?.replaceChildren();
+}
+
+async function deliverInvoiceEmail(invoice, to, subject, body) {
+  const message = { type: "email", to, subject, body, number: invoice.number };
+  const bridge = window.webkit?.messageHandlers?.folio;
+  if (bridge) {
+    bridge.postMessage(message);
+    return "sent";
+  }
+  if (window.__FOLIO_WIN__ && window.pywebview?.api?.emailInvoice) {
+    const html = document.getElementById("mail-sheet")?.innerHTML || "";
+    const error = await window.pywebview.api.emailInvoice({ ...message, html });
+    clearMailSheet();
+    if (typeof error === "string" && error.startsWith("error:")) {
+      alert(error.slice(6));
+      return "failed";
+    }
+    if (typeof error === "string" && error.startsWith("opened:")) alert(error.slice(7));
+    return "sent";
+  }
+  return "browser";
+}
+
+function invoiceShareName(invoice) {
+  const number = String(invoice.number || "invoice").replace(/[\\/:*?"<>|]+/g, "-").trim() || "invoice";
+  return `Invoice-${number}.pdf`;
+}
+
+function shareInvoiceFile(file, title, text) {
+  if (typeof navigator.share !== "function" || typeof navigator.canShare !== "function") return null;
+  let filesOk = false;
+  try {
+    filesOk = navigator.canShare({ files: [file] });
+  } catch {
+    filesOk = false;
+  }
+  if (!filesOk) return null;
+  const payload = { files: [file] };
+  try {
+    if (navigator.canShare({ title, text, files: [file] })) {
+      payload.title = title;
+      payload.text = text;
+    }
+  } catch {
+    /* This browser can share the file without the title and text. */
+  }
+  return navigator.share(payload).then(
+    () => true,
+    () => false
   );
-  if (invoice.status === "draft") markInvoiceSent(invoice);
+}
+
+function invoicePdfFile(invoice) {
+  return new File([invoicePdfBytes(invoice)], invoiceShareName(invoice), { type: "application/pdf" });
+}
+
+function invoicePdfBytes(invoice) {
+  const previous = data.business;
+  const supplier = businessFor(invoice);
+  if (supplier) data.business = supplier;
+  try {
+    return encodeInvoicePdf(invoicePdfRows(invoice));
+  } finally {
+    data.business = previous;
+  }
+}
+
+function invoicePdfRows(invoice) {
+  const client = clientById(invoice.clientId);
+  const business = businessFor(invoice) || {};
+  const lines = invoiceLines(invoice);
+  const sums = totals(invoice);
+  const rows = [
+    { text: invoiceType(invoice) === "expense" ? "Expense" : "Invoice", size: 22, bold: true },
+    { text: String(invoice.number || ""), size: 14, bold: true },
+    { text: "" },
+    { text: business.name || "Your business", size: 13, bold: true },
+  ];
+  pdfDetail(rows, [business.address, business.email, business.phone, marked("Reg. no.", business.registrationNumber), marked("Tax ID", business.taxId)]);
+  rows.push({ text: "" }, { text: "Bill to", bold: true });
+  if (client) pdfDetail(rows, [client.name, client.address, client.email, marked("Reg. no.", client.registrationNumber), marked("Tax ID", client.taxId)]);
+  else rows.push({ text: "No client yet" });
+  rows.push(
+    { text: "" },
+    { text: `Issued ${formatDate(invoice.issueDate, invoice.dateFormat) || "—"}` },
+    { text: `Due ${formatDate(invoice.dueDate, invoice.dateFormat) || "—"}` },
+    { text: "" }
+  );
+  if (lines.length) {
+    rows.push({ text: "Lines", bold: true });
+    lines.forEach((item) => {
+      const detail = [item.unit, hasMark(item.qty) ? `Qty ${item.qty}` : "", hasMark(item.rate) ? money(item.rate) : "", money(lineAmount(item))]
+        .filter(Boolean)
+        .join("  ");
+      rows.push({ text: item.description || "Item" });
+      if (detail) rows.push({ text: detail });
+    });
+    rows.push({ text: "" });
+  }
+  if (sums.discount) rows.push({ text: `Discount  −${money(sums.discount)}` });
+  rows.push({ text: `Subtotal  ${money(sums.subtotal)}` });
+  taxRows(lines).forEach((row) => rows.push({ text: `Tax ${row.rate}%  ${money(row.amount)}` }));
+  const voided = invoice.status === "cancelled";
+  rows.push({ text: `Total  ${money(voided ? 0 : sums.total)}`, bold: true });
+  if (invoice.status === "paid") rows.push({ text: "PAID", bold: true });
+  if (voided) rows.push({ text: "Cancelled. This invoice is not payable." });
+  else if (paymentTerms(invoice)) rows.push({ text: paymentTerms(invoice) });
+  if (invoice.notes && !isGeneratedPaymentNote(invoice.notes)) {
+    rows.push({ text: "" });
+    String(invoice.notes)
+      .split("\n")
+      .forEach((line) => rows.push({ text: line }));
+  }
+  return rows.flatMap((row) => wrapPdfRow(row));
+}
+
+function pdfDetail(rows, values) {
+  values.forEach((value) => {
+    if (!hasMark(value)) return;
+    String(value)
+      .split("\n")
+      .forEach((line) => rows.push({ text: line }));
+  });
+}
+
+function wrapPdfRow(row) {
+  const width = row.size > 16 ? 42 : 88;
+  const words = String(row.text ?? "").split(/\s+/).filter(Boolean);
+  if (!words.length) return [{ text: "", size: row.size || 11, bold: row.bold }];
+  const lines = [];
+  let current = "";
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length > width && current) {
+      lines.push(current);
+      current = word;
+    } else current = next;
+  });
+  if (current) lines.push(current);
+  return lines.map((text, index) => ({ text, size: row.size || 11, bold: row.bold && index === 0 }));
+}
+
+function encodeInvoicePdf(rows) {
+  const pages = [];
+  let commands = [];
+  let y = 790;
+  rows.forEach((row) => {
+    const size = row.size || 11;
+    const step = size + 7;
+    if (y - step < 48) {
+      pages.push(commands);
+      commands = [];
+      y = 790;
+    }
+    const font = row.bold ? "F2" : "F1";
+    if (row.text) commands.push(`BT /${font} ${size} Tf 48 ${y.toFixed(1)} Td ${pdfLiteral(row.text)} Tj ET`);
+    y -= row.text ? step : 8;
+  });
+  pages.push(commands);
+  return pdfBytes(pages.filter((page) => page.length));
+}
+
+function pdfLiteral(value) {
+  const extra = { "€": 128, "•": 149, "–": 150, "—": 151, "‘": 145, "’": 146, "“": 147, "”": 148, "−": 150 };
+  let out = "";
+  for (const char of String(value ?? "")) {
+    const code = extra[char] || char.codePointAt(0);
+    if (code > 255) {
+      out += "?";
+      continue;
+    }
+    if (code === 40 || code === 41 || code === 92) out += `\\${String.fromCharCode(code)}`;
+    else if (code < 32 || code > 126) out += `\\${code.toString(8).padStart(3, "0")}`;
+    else out += String.fromCharCode(code);
+  }
+  return `(${out})`;
+}
+
+function pdfBytes(pages) {
+  const font1 = 1;
+  const font2 = 2;
+  const pagesId = 3;
+  const catalogId = 4;
+  const bodies = new Map();
+  bodies.set(font1, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+  bodies.set(font2, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+  bodies.set(catalogId, `<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+  let next = 5;
+  const kids = [];
+  (pages.length ? pages : [[]]).forEach((commands) => {
+    const stream = `${commands.join("\n")}\n`;
+    const contentId = next++;
+    const pageId = next++;
+    bodies.set(contentId, `<< /Length ${stream.length} >>\nstream\n${stream}endstream`);
+    bodies.set(
+      pageId,
+      `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Contents ${contentId} 0 R /Resources << /Font << /F1 ${font1} 0 R /F2 ${font2} 0 R >> >> >>`
+    );
+    kids.push(pageId);
+  });
+  bodies.set(pagesId, `<< /Type /Pages /Kids [${kids.map((id) => `${id} 0 R`).join(" ")}] /Count ${kids.length} >>`);
+  const chunks = ["%PDF-1.4\n"];
+  let cursor = chunks[0].length;
+  const offsets = [0];
+  const count = Math.max(...bodies.keys());
+  for (let id = 1; id <= count; id += 1) {
+    offsets[id] = cursor;
+    const object = `${id} 0 obj\n${bodies.get(id)}\nendobj\n`;
+    chunks.push(object);
+    cursor += object.length;
+  }
+  const xrefAt = cursor;
+  let xref = `xref\n0 ${count + 1}\n0000000000 65535 f \n`;
+  for (let id = 1; id <= count; id += 1) xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  xref += `trailer\n<< /Size ${count + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefAt}\n%%EOF`;
+  chunks.push(xref);
+  return new TextEncoder().encode(chunks.join(""));
 }
 
 function openMailClient(url) {
@@ -289,13 +554,12 @@ function openMailClient(url) {
     window.pywebview.api.openMail(url);
     return;
   }
-  const frame = document.createElement("iframe");
-  frame.hidden = true;
-  frame.setAttribute("aria-hidden", "true");
-  frame.tabIndex = -1;
-  document.body.appendChild(frame);
-  frame.src = url;
-  window.setTimeout(() => frame.remove(), 1500);
+  const link = document.createElement("a");
+  link.href = url;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function markInvoiceSent(invoice) {

@@ -1,17 +1,21 @@
 """Desktop window that shows the invoicing screen and writes to the database."""
 
 import json
-import re
+import subprocess
 import sys
+import time
 from pathlib import Path
+from urllib.parse import quote
 
 import gi
 
+gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 gi.require_version("WebKit2", "4.1")
-from gi.repository import Gio, GLib, Gtk, WebKit2
+from gi.repository import Gdk, Gio, GLib, Gtk, WebKit2
 
 from folio.db import load_desk, save_desk
+from folio.mail import email_fields, mail_pdf_path, pdf_name
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "index.html"
@@ -65,6 +69,9 @@ def on_script_message(_manager, result, webview):
         return
     if message.get("type") == "mailto":
         GLib.idle_add(open_mailto, webview, message.get("url"))
+        return
+    if message.get("type") == "email":
+        GLib.idle_add(email_invoice, webview, message)
 
 
 def export_backup(webview, desk):
@@ -99,11 +106,6 @@ def export_backup(webview, desk):
         report.run()
         report.destroy()
     return False
-
-
-def pdf_name(number):
-    cleaned = re.sub(r'[\\/:*?"<>|]+', "-", str(number or "").strip())
-    return f"{cleaned or 'invoice'}.pdf"
 
 
 def print_invoice(webview, number):
@@ -147,6 +149,161 @@ def print_invoice(webview, number):
     return False
 
 
+_mail_jobs = []
+_mail_generation = 0
+
+
+def email_invoice(webview, message):
+    global _mail_generation
+    fields = email_fields(message)
+    window = webview.get_toplevel() if webview is not None else None
+    parent = window if isinstance(window, Gtk.Window) else None
+    if fields is None:
+        clear_mail_sheet(webview)
+        report_error(parent, "Folio could not open the mail client.", "The message was missing an email address.")
+        return False
+    to, subject, body, number = fields
+    _mail_generation += 1
+    generation = _mail_generation
+    destination = mail_pdf_path(number)
+
+    def finished(ok, detail):
+        def complete():
+            if generation != _mail_generation:
+                return False
+            clear_mail_sheet(webview)
+            if not ok:
+                report_error(parent, "Folio could not attach the invoice.", detail or "The PDF was not created.")
+                return False
+            launch_composed_mail(parent, to, subject, body, destination)
+            return False
+
+        GLib.idle_add(complete)
+
+    GLib.timeout_add(150, lambda: write_invoice_pdf(webview, destination, finished) or False)
+    return False
+
+
+def write_invoice_pdf(webview, destination, done):
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        done(False, str(exc))
+        return False
+    settings = Gtk.PrintSettings()
+    settings.set_printer("Print to File")
+    settings.set(Gtk.PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf")
+    settings.set(Gtk.PRINT_SETTINGS_OUTPUT_URI, destination.resolve().as_uri())
+    operation = WebKit2.PrintOperation.new(webview)
+    _mail_jobs.append(operation)
+    page = Gtk.PageSetup()
+    page.set_paper_size(Gtk.PaperSize.new(Gtk.PAPER_NAME_A4))
+    page.set_top_margin(0, Gtk.Unit.MM)
+    page.set_bottom_margin(0, Gtk.Unit.MM)
+    page.set_left_margin(0, Gtk.Unit.MM)
+    page.set_right_margin(0, Gtk.Unit.MM)
+    operation.set_page_setup(page)
+    operation.set_print_settings(settings)
+    state = {"done": False}
+
+    def finish(ok, detail):
+        if state["done"]:
+            return
+        state["done"] = True
+        if operation in _mail_jobs:
+            _mail_jobs.remove(operation)
+        ready = ok and destination.is_file() and destination.stat().st_size > 0
+        done(ready, None if ready else detail or "The PDF was not created.")
+
+    operation.connect("finished", lambda *_args: finish(True, None))
+    operation.connect("failed", lambda _operation, error: finish(False, str(error)))
+    try:
+        operation.print_()
+    except GLib.Error as exc:
+        finish(False, str(exc))
+    return False
+
+
+def clear_mail_sheet(webview):
+    if webview is None:
+        return
+    webview.run_javascript("clearMailSheet()", None, _ignore_js, None)
+
+
+def _ignore_js(webview, result, _data):
+    try:
+        webview.run_javascript_finish(result)
+    except Exception:
+        return
+
+
+def launch_composed_mail(parent, to, subject, body, attachment):
+    handler = mailto_desktop()
+    if "evolution" in handler:
+        try:
+            launched = Gio.AppInfo.launch_default_for_uri(evolution_mailto(to, subject, body, attachment), None)
+        except GLib.Error as exc:
+            report_error(parent, "Folio could not open the mail client.", str(exc))
+            return
+        if not launched:
+            report_error(parent, "Folio could not open the mail client.", "No mail application is available for this link.")
+        return
+    if mail_handler_is_browser(handler):
+        explain_browser_attachment(parent, attachment)
+        command = ["xdg-email", "--utf8", "--subject", subject, "--body", body, to]
+    else:
+        command = ["xdg-email", "--utf8", "--attach", str(attachment), "--subject", subject, "--body", body, to]
+    try:
+        subprocess.Popen(command, start_new_session=True, stdin=subprocess.DEVNULL)
+    except OSError as exc:
+        report_error(
+            parent,
+            "Folio could not open the mail client.",
+            f"{exc}\nThe invoice PDF is saved at {attachment}",
+        )
+
+
+def mailto_desktop():
+    try:
+        completed = subprocess.run(
+            ["xdg-mime", "query", "default", "x-scheme-handler/mailto"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return completed.stdout.strip().lower()
+
+
+def mail_handler_is_browser(handler):
+    names = ("firefox", "chrome", "chromium", "brave", "vivaldi", "epiphany", "waterfox", "librewolf", "opera", "edge")
+    return any(name in handler for name in names)
+
+
+def evolution_mailto(to, subject, body, attachment):
+    file_uri = quote(attachment.resolve().as_uri(), safe=":/")
+    query = "&".join(
+        (
+            f"subject={quote(subject)}",
+            f"body={quote(body)}",
+            f"attach={file_uri}",
+        )
+    )
+    return f"mailto:{quote(to)}?{query}"
+
+
+def explain_browser_attachment(parent, attachment):
+    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+    clipboard.set_text(str(attachment), -1)
+    report_notice(
+        parent,
+        "Attach the invoice PDF to the message.",
+        f"This mail program cannot take the file automatically. The path is copied:\n{attachment}",
+    )
+
+
 def confirm_replace(parent, name):
     dialog = Gtk.MessageDialog(
         transient_for=parent,
@@ -160,10 +317,14 @@ def confirm_replace(parent, name):
 
 
 def report_error(parent, text, detail):
+    report_notice(parent, text, detail, Gtk.MessageType.ERROR)
+
+
+def report_notice(parent, text, detail, kind=Gtk.MessageType.INFO):
     report = Gtk.MessageDialog(
         transient_for=parent,
         buttons=Gtk.ButtonsType.OK,
-        message_type=Gtk.MessageType.ERROR,
+        message_type=kind,
         text=text,
     )
     report.format_secondary_text(detail)
@@ -171,9 +332,17 @@ def report_error(parent, text, detail):
     report.destroy()
 
 
+_last_mailto = {"uri": "", "when": 0.0}
+
+
 def open_mailto(webview, uri):
     if not isinstance(uri, str) or not uri.lower().startswith("mailto:"):
         return False
+    now = time.monotonic()
+    if uri == _last_mailto["uri"] and now - _last_mailto["when"] < 1.5:
+        return False
+    _last_mailto["uri"] = uri
+    _last_mailto["when"] = now
     window = webview.get_toplevel() if webview is not None else None
     parent = window if isinstance(window, Gtk.Window) else None
     try:
@@ -184,6 +353,26 @@ def open_mailto(webview, uri):
     if not launched:
         report_error(parent, "Folio could not open the mail client.", "No mail application is available for this link.")
     return False
+
+
+def on_load_failed(webview, _event, uri, error):
+    target = str(uri or "")
+    blocked = target.lower().startswith("mailto:") or getattr(error, "code", None) == 101
+    if not blocked:
+        return False
+    if target.lower().startswith("mailto:"):
+        GLib.idle_add(open_mailto, webview, target)
+    return True
+
+
+def on_create(webview, action):
+    try:
+        uri = action.get_request().get_uri() or ""
+    except Exception:
+        return None
+    if str(uri).lower().startswith("mailto:"):
+        GLib.idle_add(open_mailto, webview, uri)
+    return None
 
 
 def on_decide_policy(webview, decision, decision_type):
@@ -214,6 +403,8 @@ def build_webview():
     manager.add_script(script)
     webview = WebKit2.WebView.new_with_user_content_manager(manager)
     webview.connect("decide-policy", on_decide_policy)
+    webview.connect("load-failed", on_load_failed)
+    webview.connect("create", on_create)
     manager.connect("script-message-received::folio", on_script_message, webview)
     settings = webview.get_settings()
     settings.set_allow_file_access_from_file_urls(True)

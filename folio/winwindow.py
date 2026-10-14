@@ -1,15 +1,19 @@
 """Windows window. The screen is the same page; Edge's web view shows it."""
 
+import ctypes
 import json
 import mimetypes
 import os
+import subprocess
 import sys
 import threading
+from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlencode, urlparse
 
 from folio.db import load_desk, save_desk
+from folio.mail import email_fields, mail_pdf_path
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "index.html"
@@ -63,6 +67,132 @@ class PageHandler(BaseHTTPRequestHandler):
         return
 
 
+def open_mailto(to, subject, body):
+    try:
+        os.startfile(f"mailto:{quote(to)}?{urlencode({'subject': subject, 'body': body}, quote_via=quote)}")
+    except OSError as exc:
+        print(f"Folio could not open the mail client: {exc}", file=sys.stderr)
+
+
+def find_edge():
+    roots = [
+        os.environ.get("PROGRAMFILES(X86)", ""),
+        os.environ.get("PROGRAMFILES", ""),
+        os.environ.get("LOCALAPPDATA", ""),
+    ]
+    for root in roots:
+        if not root:
+            continue
+        candidate = Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def render_windows_pdf(sheet, number):
+    if not isinstance(sheet, str) or "<article" not in sheet:
+        return None
+    edge = find_edge()
+    if edge is None:
+        return None
+    try:
+        css = (ROOT / "css" / "styles.css").read_text(encoding="utf-8").replace("</style", "<\\/style")
+        document = (
+            "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            f"<style>{css}</style></head><body>{sheet}</body></html>"
+        )
+        pdf = mail_pdf_path(number)
+        html_path = pdf.with_suffix(".html")
+        html_path.write_text(document, encoding="utf-8")
+        subprocess.run(
+            [
+                str(edge),
+                "--headless",
+                "--disable-gpu",
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={pdf}",
+                html_path.resolve().as_uri(),
+            ],
+            check=False,
+            timeout=45,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if pdf.is_file() and pdf.stat().st_size > 0:
+        return pdf
+    return None
+
+
+def mapi_send(to, subject, body, attachment):
+    try:
+        mapi = ctypes.WinDLL("mapi32")
+    except OSError:
+        return 2
+    wide = hasattr(mapi, "MAPISendMailW")
+    text = ctypes.c_wchar_p if wide else ctypes.c_char_p
+
+    def native(value):
+        return value if wide else value.encode("mbcs", errors="replace")
+
+    class Recip(ctypes.Structure):
+        _fields_ = [
+            ("ulReserved", wintypes.ULONG),
+            ("ulRecipClass", wintypes.ULONG),
+            ("lpszName", text),
+            ("lpszAddress", text),
+            ("ulEIDSize", wintypes.ULONG),
+            ("lpEntryID", ctypes.c_void_p),
+        ]
+
+    class FileDesc(ctypes.Structure):
+        _fields_ = [
+            ("ulReserved", wintypes.ULONG),
+            ("flFlags", wintypes.ULONG),
+            ("nPosition", wintypes.ULONG),
+            ("lpszPathName", text),
+            ("lpszFileName", text),
+            ("lpFileType", ctypes.c_void_p),
+        ]
+
+    class Message(ctypes.Structure):
+        _fields_ = [
+            ("ulReserved", wintypes.ULONG),
+            ("lpszSubject", text),
+            ("lpszNoteText", text),
+            ("lpszMessageType", text),
+            ("lpszDateReceived", text),
+            ("lpszConversationID", text),
+            ("flFlags", wintypes.ULONG),
+            ("lpOriginator", ctypes.c_void_p),
+            ("nRecipCount", wintypes.ULONG),
+            ("lpRecips", ctypes.POINTER(Recip)),
+            ("nFileCount", wintypes.ULONG),
+            ("lpFiles", ctypes.POINTER(FileDesc)),
+        ]
+
+    recip = Recip(0, 1, native(to), native(f"SMTP:{to}"), 0, None)
+    file_desc = FileDesc(0, 0, 0xFFFFFFFF, native(str(attachment)), native(attachment.name), None)
+    mail = Message(
+        0,
+        native(subject),
+        native(body),
+        None,
+        None,
+        None,
+        0,
+        None,
+        1,
+        ctypes.pointer(recip),
+        1,
+        ctypes.pointer(file_desc),
+    )
+    send = mapi.MAPISendMailW if wide else mapi.MAPISendMail
+    send.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(Message), wintypes.ULONG, wintypes.ULONG]
+    send.restype = wintypes.ULONG
+    return int(send(None, 0, ctypes.pointer(mail), 0x8 | 0x1, 0))
+
+
 class FolioApi:
     def save(self, desk):
         if isinstance(desk, str):
@@ -109,6 +239,29 @@ class FolioApi:
             os.startfile(url)
         except OSError as exc:
             print(f"Folio could not open the mail client: {exc}", file=sys.stderr)
+
+    def emailInvoice(self, message):
+        if isinstance(message, str):
+            try:
+                message = json.loads(message)
+            except json.JSONDecodeError:
+                return "error:Folio could not read the email."
+        fields = email_fields(message)
+        if fields is None:
+            return "error:Folio could not read the email."
+        to, subject, body, number = fields
+        sheet = message.get("html") if isinstance(message, dict) else ""
+        pdf = render_windows_pdf(sheet, number)
+        if pdf is None:
+            open_mailto(to, subject, body)
+            return "opened:Folio opened the message without the PDF."
+        result = mapi_send(to, subject, body, pdf)
+        if result == 0:
+            return ""
+        if result == 1:
+            return "error:The email was cancelled."
+        open_mailto(to, subject, body)
+        return f"opened:Folio opened the message without the PDF. The file is saved at {pdf}."
 
 
 def main():

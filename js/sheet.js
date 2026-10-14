@@ -29,6 +29,11 @@ function paintSheet({ animate = false } = {}) {
   const invoice = currentInvoice();
   const wrap = main.querySelector("#sheet-page");
   if (!invoice || !wrap) return;
+  wrap.innerHTML = sheetMarkup(invoice);
+  if (!animate) wrap.querySelector(".sheet")?.classList.add("sheet-quiet");
+}
+
+function sheetMarkup(invoice) {
   const client = clientById(invoice.clientId);
   const business = businessFor(invoice) || {
     name: "",
@@ -99,8 +104,8 @@ function paintSheet({ animate = false } = {}) {
     )
     .filter(Boolean);
 
-  wrap.innerHTML = `
-    <article class="sheet" id="sheet">
+  return `
+    <article class="sheet">
       ${stamp}
       <header class="sheet-top">
         <div>
@@ -172,5 +177,4 @@ function paintSheet({ animate = false } = {}) {
       ${invoice.notes && !isGeneratedPaymentNote(invoice.notes) ? `<p class="notes">${esc(invoice.notes)}</p>` : ""}
     </article>
   `;
-  if (!animate) wrap.querySelector(".sheet")?.classList.add("sheet-quiet");
 }

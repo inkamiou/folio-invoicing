@@ -979,6 +979,10 @@ body.preview-open {
   display: none;
 }
 
+#mail-sheet {
+  display: none;
+}
+
 .sheet {
   position: relative;
   width: 100%;
@@ -1358,6 +1362,23 @@ body.preview-open {
     overflow: visible;
     padding: 0;
     background: none;
+  }
+
+  #mail-sheet {
+    display: none !important;
+  }
+
+  body.mail-print .desk {
+    display: none !important;
+  }
+
+  body.mail-print #mail-sheet {
+    display: block !important;
+    position: static;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    background: transparent;
   }
 
   .desk,
